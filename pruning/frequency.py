@@ -9,6 +9,7 @@ import torch.nn as nn
 from transformers import AutoModelForSequenceClassification
 
 from .base import get_dataset_tokens_with_counts, create_reduced_embeddings
+from utils import get_task_metadata
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -74,7 +75,6 @@ def setup_frequency_based_model(task_name, model_name, prune_percent=0):
     logger.info(f"Setting up frequency-based model for {task_name} with {prune_percent}% pruning")
     
     # Load GLUE task metadata
-    from ..utils import get_task_metadata
     task_meta = get_task_metadata(task_name)
     n_labels = task_meta["n_labels"]
     

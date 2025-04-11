@@ -12,6 +12,7 @@ from scipy.spatial.distance import pdist, squareform
 from transformers import AutoTokenizer
 
 from .base import get_dataset_vocabulary, create_reduced_embeddings
+from utils import get_task_metadata
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -156,7 +157,6 @@ def setup_clustering_based_model(task_name, model_name, prune_percent=0, cluster
     logger.info(f"Setting up clustering-based model for {task_name} with {prune_percent}% pruning")
     
     # Load GLUE task metadata
-    from ..utils import get_task_metadata
     task_meta = get_task_metadata(task_name)
     n_labels = task_meta["n_labels"]
     

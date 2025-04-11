@@ -13,6 +13,7 @@ from transformers import AutoTokenizer, AutoModelForSequenceClassification
 
 from .base import get_dataset_tokens_with_counts, create_hybrid_embeddings
 from .frequency import frequency_based_pruning
+from utils import get_task_metadata
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -109,7 +110,6 @@ def setup_hybrid_model(task_name, model_name, prune_percent=20, num_clusters=50)
     logger.info(f"Setting up hybrid model for {task_name} with {prune_percent}% pruning and {num_clusters} OOV clusters")
     
     # Load GLUE task metadata
-    from ..utils import get_task_metadata
     task_meta = get_task_metadata(task_name)
     n_labels = task_meta["n_labels"]
     

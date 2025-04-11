@@ -20,6 +20,7 @@ except ImportError:
 from .base import create_hybrid_embeddings
 from .frequency import frequency_based_pruning
 from .hybrid import cluster_removed_tokens
+from utils import get_task_metadata
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -257,7 +258,6 @@ def setup_importance_based_model(task_name, model_name, prune_percent=20, num_cl
     logger.info(f"Setting up importance-based model for {task_name} with {prune_percent}% pruning, {num_clusters} OOV clusters, importance_type={importance_type}")
     
     # Load GLUE task metadata
-    from ..utils import get_task_metadata
     task_meta = get_task_metadata(task_name)
     n_labels = task_meta["n_labels"]
     

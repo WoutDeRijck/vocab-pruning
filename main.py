@@ -33,7 +33,8 @@ from pruning.clustering import setup_clustering_based_model
 from pruning.frequency import setup_frequency_based_model
 from pruning.hybrid import setup_hybrid_model
 from pruning.importance import setup_importance_based_model
-from pruning.base import task_to_keys, glue_tasks
+from pruning.base import task_to_keys
+from utils import glue_tasks
 
 # Import functions from data.py and training.py
 from training import setup_training, generate_test_predictions
