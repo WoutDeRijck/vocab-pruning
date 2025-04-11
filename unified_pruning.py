@@ -313,6 +313,34 @@ def parse_args():
         help="Word importance calculation type: 0=off, 1=no norm, 2=L1 norm, 3=L2 norm (default)"
     )
     
+    # Custom split related arguments
+    parser.add_argument(
+        "--use_custom_splits", 
+        action="store_true",
+        help="Use custom train/validation/test splits instead of original GLUE splits"
+    )
+    
+    parser.add_argument(
+        "--train_ratio", 
+        type=float, 
+        default=0.8,
+        help="Ratio of data to use for training when using custom splits"
+    )
+    
+    parser.add_argument(
+        "--validation_ratio", 
+        type=float, 
+        default=0.1,
+        help="Ratio of data to use for validation when using custom splits"
+    )
+    
+    parser.add_argument(
+        "--test_ratio", 
+        type=float, 
+        default=0.1,
+        help="Ratio of data to use for testing when using custom splits"
+    )
+    
     # Common optional arguments
     parser.add_argument(
         "--output_dir", 
@@ -1664,14 +1692,78 @@ def run_pipeline(args):
             importance_type=args.importance_type
         )
     
-    # Prepare datasets with token mapping
-    train_dataset, eval_dataset, test_dataset = prepare_datasets_with_mapping(
-        args.task, 
-        token_map, 
-        oov_lookup,
-        tokenizer, 
-        batch_size=args.batch_size
-    )
+    # Prepare datasets - either with custom splits or original GLUE splits
+    if args.use_custom_splits:
+        logger.info("Using custom train/validation/test splits")
+        try:
+            # Import custom splitting utilities
+            from split_utils import prepare_custom_split_datasets
+            
+            # Create custom splits
+            train_dataset, eval_dataset, test_dataset = prepare_custom_split_datasets(
+                task_name=args.task,
+                tokenizer=tokenizer,
+                train_ratio=args.train_ratio,
+                validation_ratio=args.validation_ratio,
+                test_ratio=args.test_ratio,
+                max_length=128,  # Same as in original prepare_datasets_with_mapping
+                random_seed=args.seed
+            )
+            
+            # Apply token remapping to create datasets with reduced vocabulary
+            logger.info("Applying vocabulary mapping to custom splits")
+            
+            # Function to remap tokens in a dataset
+            def remap_tokens(dataset):
+                # Create a mapping dictionary for quick lookup
+                id_map_dict = token_map.copy()
+                if oov_lookup:
+                    id_map_dict.update(oov_lookup)
+                
+                def map_example(example):
+                    # Map input_ids using our token mapping
+                    new_input_ids = []
+                    for token_id in example['input_ids']:
+                        if token_id in id_map_dict:
+                            new_input_ids.append(id_map_dict[token_id])
+                        else:
+                            # Use UNK token (0) for OOV tokens
+                            new_input_ids.append(0)
+                    
+                    example['input_ids'] = new_input_ids
+                    return example
+                
+                # Apply mapping to each example
+                return dataset.map(map_example, desc="Remapping token IDs")
+            
+            # Apply remapping to all datasets
+            train_dataset = remap_tokens(train_dataset)
+            eval_dataset = remap_tokens(eval_dataset)
+            test_dataset = remap_tokens(test_dataset)
+            
+            logger.info(f"Created custom splits with sizes: train={len(train_dataset)}, validation={len(eval_dataset)}, test={len(test_dataset)}")
+            
+        except ImportError as e:
+            logger.error(f"Failed to import split_utils module: {e}")
+            logger.warning("Falling back to original GLUE splits")
+            
+            # If custom splitting fails, fall back to original method
+            train_dataset, eval_dataset, test_dataset = prepare_datasets_with_mapping(
+                args.task, 
+                token_map, 
+                oov_lookup,
+                tokenizer, 
+                batch_size=args.batch_size
+            )
+    else:
+        # Use original GLUE splits
+        train_dataset, eval_dataset, test_dataset = prepare_datasets_with_mapping(
+            args.task, 
+            token_map, 
+            oov_lookup,
+            tokenizer, 
+            batch_size=args.batch_size
+        )
     
     # Setup trainer
     trainer, metrics_callback = setup_training(
@@ -1689,6 +1781,10 @@ def run_pipeline(args):
     if oov_lookup:
         logger.info(f"OOV clusters: {len(set(oov_lookup.values()))}")
     logger.info(f"Vocabulary reduction: {(1 - len(token_map)/len(tokenizer.get_vocab()))*100:.2f}%")
+    
+    # Log whether we're using custom splits
+    if args.use_custom_splits:
+        logger.info(f"Using custom splits with ratios: train={args.train_ratio}, val={args.validation_ratio}, test={args.test_ratio}")
     
     # Train and evaluate
     logger.info(f"Starting training for {args.epochs} epochs")

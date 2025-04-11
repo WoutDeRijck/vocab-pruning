@@ -8,3 +8,4 @@ pandas
 evaluate
 tqdm
 nltk
+accelerate
