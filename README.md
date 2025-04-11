@@ -74,11 +74,11 @@ The `examples/` directory contains scripts for running each pruning method on sp
 - `run_frequency_pruning.py`: Basic frequency-based pruning
 - `run_frequency_oov_pruning.py`: Frequency-based pruning with OOV clustering
 - `run_importance_oov_pruning.py`: Word importance pruning with OOV clustering
-- `run_importance_no_oov_pruning.py`: Word importance pruning without OOV clustering
+- `run_importance_pruning.py`: Word importance pruning without OOV clustering
 - `run_random_pruning.py`: Random token selection
 - `run_attention_pruning.py`: Attention-based pruning
 
-Each script can be run on any GLUE task with appropriate command-line arguments.
+Each script supports the `--task` parameter to specify which GLUE task to run, and contains task-specific defaults for parameters like learning rate, batch size, and pruning percentage. You can override these defaults using command-line arguments.
 
 ## Examples
 
@@ -114,7 +114,7 @@ python examples/run_importance_oov_pruning.py --task qnli --prune_percent 15 --n
 ```bash
 python main.py --task sst2 --pruning_method importance --prune_percent 20 --importance_type 3 --epochs 3
 # Or using example script:
-python examples/run_importance_no_oov_pruning.py --task sst2 --prune_percent 20 --importance_type 3
+python examples/run_importance_pruning.py --task sst2 --prune_percent 20 --importance_type 3
 ```
 
 ### Random Selection Pruning
@@ -133,8 +133,48 @@ python main.py --task mrpc --pruning_method attention --prune_percent 20 --epoch
 python main.py --task mrpc --pruning_method attention --prune_percent 20 --attention_model path/to/finetuned/model --epochs 3
 
 # Or using example script:
-python examples/run_attention_pruning.py --task mrpc --prune_percent 20 --attention_model_path path/to/finetuned/model
+python examples/run_attention_pruning.py --task mrpc --prune_percent 20 --finetuned_model_path path/to/finetuned/model
 ```
+
+### Using Task-Specific Defaults
+
+Each example script includes task-specific defaults for parameters like learning rate, batch size, epochs, and pruning percentage. You can run scripts with these defaults:
+
+```bash
+# Run with defaults for SST-2 task
+python examples/run_random_pruning.py --task sst2
+
+# Run with defaults for MRPC task but override pruning percentage
+python examples/run_importance_pruning.py --task mrpc --prune_percent 30
+
+# Run with defaults for CoLA task but override importance type
+python examples/run_importance_pruning.py --task cola --importance_type 2
+```
+
+### Running on Multiple Tasks
+
+Many of the example scripts support running on multiple GLUE tasks in sequence. For these scripts, you can use the `--tasks` argument to specify which tasks to run:
+
+```bash
+# Run on multiple specific tasks
+python examples/run_frequency_oov_pruning.py --tasks sst2 cola mrpc
+
+# Run on all GLUE tasks
+python examples/run_importance_oov_pruning.py --tasks cola mnli mrpc qnli qqp rte sst2 stsb wnli
+
+# Run on multiple tasks with a shared pruning percentage
+python examples/run_clustering_pruning.py --tasks mrpc rte sst2 --prune_percent 25
+```
+
+Each task will be run sequentially using its task-specific default parameters, which can be overridden with command-line arguments. Results will be saved in task-specific subdirectories within the output directory.
+
+Scripts that support multiple tasks include:
+- `run_clustering_pruning.py`
+- `run_frequency_pruning.py`
+- `run_frequency_oov_pruning.py`
+- `run_importance_oov_pruning.py`
+
+Note that some scripts like `run_importance_pruning.py`, `run_random_pruning.py`, and `run_attention_pruning.py` use a single `--task` parameter instead, and need to be called multiple times for different tasks.
 
 ### Using Cross-Validation
 ```bash
