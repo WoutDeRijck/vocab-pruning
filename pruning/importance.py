@@ -6,7 +6,6 @@ This module implements vocabulary pruning based on token importance using TF-IDF
 
 import logging
 import numpy as np
-import torch
 import torch.nn as nn
 from transformers import AutoModelForSequenceClassification
 

@@ -7,7 +7,6 @@ with clustering of OOV tokens.
 
 import logging
 import numpy as np
-import torch
 import torch.nn as nn
 from sklearn.cluster import KMeans
 from transformers import AutoTokenizer, AutoModelForSequenceClassification

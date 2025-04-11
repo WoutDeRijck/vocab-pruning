@@ -4,8 +4,6 @@ Metrics and callbacks for vocabulary pruning evaluation.
 
 import logging
 import numpy as np
-from sklearn.metrics import matthews_corrcoef, accuracy_score, f1_score
-from scipy.stats import pearsonr, spearmanr
 from transformers import TrainerCallback
 from evaluate import load
 

@@ -4,10 +4,8 @@ Base utilities for vocabulary pruning.
 This module contains common functions and utilities used by all pruning methods.
 """
 
-import os
 import logging
 from collections import Counter
-import numpy as np
 import torch
 from datasets import load_dataset
 from transformers import AutoTokenizer

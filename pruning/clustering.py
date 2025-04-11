@@ -6,7 +6,6 @@ This module implements vocabulary pruning based on token embedding clustering.
 
 import logging
 import numpy as np
-import torch
 import torch.nn as nn
 from sklearn.cluster import KMeans, AgglomerativeClustering
 from scipy.spatial.distance import pdist, squareform

@@ -3,7 +3,6 @@ Training functions for vocabulary pruning.
 """
 
 import logging
-import os
 from functools import partial
 import torch
 import numpy as np

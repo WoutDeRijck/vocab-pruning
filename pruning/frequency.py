@@ -5,7 +5,6 @@ This module implements vocabulary pruning based on token frequency.
 """
 
 import logging
-import torch
 import torch.nn as nn
 from transformers import AutoModelForSequenceClassification
 

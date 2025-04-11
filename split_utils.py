@@ -6,11 +6,11 @@ from the original GLUE train and validation sets.
 """
 
 import logging
-from typing import Dict, Tuple
+from typing import Tuple, Generator
 
 import numpy as np
 from datasets import load_dataset, Dataset, concatenate_datasets
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import train_test_split, KFold, StratifiedKFold
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -259,4 +259,188 @@ def prepare_custom_split_datasets(
         desc="Tokenizing test dataset",
     )
     
-    return train_dataset, valid_dataset, test_dataset 
+    # Rename 'label' to 'labels' to match what the model expects
+    if 'label' in train_dataset.column_names:
+        train_dataset = train_dataset.rename_column('label', 'labels')
+        valid_dataset = valid_dataset.rename_column('label', 'labels')
+        test_dataset = test_dataset.rename_column('label', 'labels')
+    else:
+        logger.warning("No 'label' column found in datasets")
+    
+    return train_dataset, valid_dataset, test_dataset
+
+def create_cross_validation_splits(
+    task_name: str,
+    n_folds: int = 5,
+    test_ratio: float = 0.1,
+    random_seed: int = 42
+) -> Tuple[Generator[Tuple[Dataset, Dataset, Dataset], None, None], Dataset]:
+    """
+    Create cross-validation splits from GLUE datasets, plus a separate test set.
+    
+    Args:
+        task_name: Name of the GLUE task
+        n_folds: Number of folds for cross-validation
+        test_ratio: Proportion of data to use for the held-out test set
+        random_seed: Random seed for reproducibility
+        
+    Returns:
+        cv_splits: Generator yielding (train, val) datasets for each fold
+        test_dataset: The common test dataset (same for all folds)
+    """
+    # First separate out a test set
+    logger.info(f"Creating {n_folds}-fold cross-validation splits with {test_ratio:.0%} test set for {task_name}")
+    
+    # Handle 'mnli' special case
+    dataset_name = "mnli" if task_name.startswith("mnli") else task_name
+    
+    # Load original train and validation datasets
+    raw_datasets = load_dataset("glue", dataset_name)
+    
+    # Get split names for train and validation
+    train_split_name = "train"
+    
+    # For MNLI, the validation set is either validation_matched or validation_mismatched
+    if task_name == "mnli-matched":
+        valid_split_name = "validation_matched"
+    elif task_name == "mnli-mismatched":
+        valid_split_name = "validation_mismatched"
+    else:
+        valid_split_name = "validation"
+    
+    # Get original train and validation sets
+    train_dataset = raw_datasets[train_split_name]
+    valid_dataset = raw_datasets[valid_split_name]
+    
+    logger.info(f"Original train set size: {len(train_dataset)}")
+    logger.info(f"Original validation set size: {len(valid_dataset)}")
+    
+    # Combine train and validation sets
+    combined_dataset = concatenate_datasets([train_dataset, valid_dataset])
+    logger.info(f"Combined dataset size: {len(combined_dataset)}")
+    
+    # First separate out the test set
+    is_regression = task_name == "stsb"
+    stratify = None if is_regression else combined_dataset['label'] if 'label' in combined_dataset.column_names else None
+    
+    train_val_indices, test_indices = train_test_split(
+        np.arange(len(combined_dataset)),
+        test_size=test_ratio,
+        random_state=random_seed,
+        stratify=stratify
+    )
+    
+    # Create the test dataset
+    test_dataset = combined_dataset.select(test_indices)
+    logger.info(f"Test set size: {len(test_dataset)} ({len(test_dataset)/len(combined_dataset)*100:.1f}%)")
+    
+    # Get the training+validation set
+    train_val_dataset = combined_dataset.select(train_val_indices)
+    
+    # Set up cross-validation
+    if is_regression or 'label' not in train_val_dataset.column_names:
+        # For regression or if no labels, use KFold
+        logger.info("Using KFold cross-validation (non-stratified)")
+        cv = KFold(n_splits=n_folds, shuffle=True, random_state=random_seed)
+        split_indices = list(cv.split(np.arange(len(train_val_dataset))))
+    else:
+        # For classification, use StratifiedKFold
+        logger.info("Using StratifiedKFold cross-validation")
+        cv = StratifiedKFold(n_splits=n_folds, shuffle=True, random_state=random_seed)
+        split_indices = list(cv.split(
+            np.arange(len(train_val_dataset)), 
+            train_val_dataset['label']
+        ))
+    
+    def generate_fold_splits():
+        for fold_idx, (train_idx, val_idx) in enumerate(split_indices):
+            logger.info(f"Fold {fold_idx+1}/{n_folds} - train: {len(train_idx)} examples, val: {len(val_idx)} examples")
+            fold_train = train_val_dataset.select(train_idx)
+            fold_val = train_val_dataset.select(val_idx)
+            yield fold_train, fold_val, test_dataset
+    
+    return generate_fold_splits(), test_dataset
+
+def prepare_cross_validation_datasets(
+    task_name: str,
+    tokenizer,
+    n_folds: int = 5,
+    test_ratio: float = 0.1,
+    max_length: int = 128,
+    random_seed: int = 42
+) -> Generator[Tuple[Dataset, Dataset, Dataset], None, None]:
+    """
+    Create and tokenize cross-validation splits ready for model training.
+    
+    Args:
+        task_name: Name of the GLUE task
+        tokenizer: Tokenizer to use
+        n_folds: Number of folds for cross-validation
+        test_ratio: Proportion of data to use for the held-out test set
+        max_length: Maximum sequence length
+        random_seed: Random seed
+        
+    Returns:
+        Generator yielding tokenized (train, val, test) datasets for each fold
+    """
+    # Get the fold splits
+    fold_splits_generator, _ = create_cross_validation_splits(
+        task_name=task_name,
+        n_folds=n_folds,
+        test_ratio=test_ratio,
+        random_seed=random_seed
+    )
+    
+    # Get input keys for this task
+    sentence1_key, sentence2_key = task_to_keys[task_name.replace("-matched", "").replace("-mismatched", "")]
+    
+    # Define preprocessing function
+    def preprocess_function(examples):
+        # Handle single sentence or sentence pairs
+        if sentence2_key is None:
+            return tokenizer(
+                examples[sentence1_key],
+                padding="max_length",
+                truncation=True,
+                max_length=max_length,
+            )
+        return tokenizer(
+            examples[sentence1_key],
+            examples[sentence2_key],
+            padding="max_length",
+            truncation=True,
+            max_length=max_length,
+        )
+    
+    # Process each fold
+    for fold_idx, (train_dataset, val_dataset, test_dataset) in enumerate(fold_splits_generator):
+        logger.info(f"Tokenizing fold {fold_idx+1}/{n_folds}")
+        
+        # Apply preprocessing to all splits
+        train_dataset = train_dataset.map(
+            preprocess_function,
+            batched=True,
+            desc=f"Tokenizing fold {fold_idx+1} train",
+        )
+        
+        val_dataset = val_dataset.map(
+            preprocess_function,
+            batched=True,
+            desc=f"Tokenizing fold {fold_idx+1} validation",
+        )
+        
+        test_dataset = test_dataset.map(
+            preprocess_function,
+            batched=True,
+            desc=f"Tokenizing fold {fold_idx+1} test",
+        )
+        
+        # Rename 'label' to 'labels' to match what the model expects
+        if 'label' in train_dataset.column_names:
+            train_dataset = train_dataset.rename_column('label', 'labels')
+            val_dataset = val_dataset.rename_column('label', 'labels')
+            test_dataset = test_dataset.rename_column('label', 'labels')
+        else:
+            logger.warning(f"Fold {fold_idx+1}: No 'label' column found in datasets")
+        
+        yield train_dataset, val_dataset, test_dataset 
