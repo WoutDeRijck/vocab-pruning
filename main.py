@@ -10,6 +10,9 @@ experiments on GLUE benchmark tasks with various techniques:
 2. Frequency-based pruning: Remove least frequently used tokens
 3. Hybrid pruning: Combine frequency-based pruning with clustering for OOV tokens
 4. Word importance pruning: Use TF-IDF to determine token importance
+5. Random selection pruning: Randomly select tokens to keep or remove (baseline)
+6. Word importance pruning without OOV: Use TF-IDF with OOV tokens mapped to UNK
+7. Attention-based pruning: Use attention patterns from a fine-tuned model to determine token importance
 """
 
 import os
@@ -31,8 +34,11 @@ from sklearn.metrics import precision_score, recall_score
 # Import pruning modules
 from pruning.clustering import setup_clustering_based_model
 from pruning.frequency import setup_frequency_based_model
-from pruning.hybrid import setup_hybrid_model
+from pruning.frequency_oov import setup_frequency_oov_model
+from pruning.importance_oov import setup_importance_oov_model
 from pruning.importance import setup_importance_based_model
+from pruning.random import setup_random_based_model
+from pruning.attention import setup_attention_based_model
 from pruning.base import task_to_keys
 from utils import glue_tasks
 
@@ -81,7 +87,7 @@ def parse_args():
         "--pruning_method", 
         type=str, 
         default="clustering",
-        choices=["clustering", "frequency", "hybrid", "importance"],
+        choices=["clustering", "frequency", "frequency_oov", "importance_oov", "importance", "random", "attention"],
         help="Method to use for vocabulary pruning"
     )
     
@@ -134,7 +140,7 @@ def parse_args():
         "--num_clusters", 
         type=int, 
         default=50,
-        help="Number of clusters for OOV token mapping (for hybrid method)"
+        help="Number of clusters for OOV token mapping (for frequency_oov and importance_oov methods)"
     )
     
     # Word importance specific arguments
@@ -144,6 +150,14 @@ def parse_args():
         default=3,
         choices=[0, 1, 2, 3],
         help="Word importance calculation type: 0=off, 1=no norm, 2=L1 norm, 3=L2 norm (default)"
+    )
+    
+    # Attention-based pruning specific arguments
+    parser.add_argument(
+        "--attention_model", 
+        type=str, 
+        default=None,
+        help="Fine-tuned model to use for attention-based pruning (defaults to model_name)"
     )
     
     # Cross-validation related arguments
@@ -388,20 +402,41 @@ def run_cross_validation_pipeline(args, tokenizer):
                     args.model_name,
                     prune_percent=args.prune_percent
                 )
-            elif args.pruning_method == "hybrid":
-                model, token_map, oov_lookup = setup_hybrid_model(
+            elif args.pruning_method == "frequency_oov":
+                model, token_map, oov_lookup = setup_frequency_oov_model(
                     args.task, 
                     args.model_name,
                     prune_percent=args.prune_percent,
                     num_clusters=args.num_clusters
+                )
+            elif args.pruning_method == "importance_oov":
+                model, token_map, oov_lookup = setup_importance_oov_model(
+                    args.task, 
+                    args.model_name,
+                    prune_percent=args.prune_percent,
+                    num_clusters=args.num_clusters,
+                    importance_type=args.importance_type
                 )
             elif args.pruning_method == "importance":
                 model, token_map, oov_lookup = setup_importance_based_model(
                     args.task, 
                     args.model_name,
                     prune_percent=args.prune_percent,
-                    num_clusters=args.num_clusters,
                     importance_type=args.importance_type
+                )
+            elif args.pruning_method == "random":
+                model, token_map, oov_lookup = setup_random_based_model(
+                    args.task, 
+                    args.model_name,
+                    prune_percent=args.prune_percent,
+                    random_seed=args.seed
+                )
+            elif args.pruning_method == "attention":
+                model, token_map, oov_lookup = setup_attention_based_model(
+                    args.task, 
+                    args.model_name,
+                    attention_model=args.attention_model,
+                    prune_percent=args.prune_percent
                 )
             
             # Apply token remapping to create datasets with reduced vocabulary
@@ -594,20 +629,41 @@ def run_standard_pipeline(args, tokenizer):
             args.model_name,
             prune_percent=args.prune_percent
         )
-    elif args.pruning_method == "hybrid":
-        model, token_map, oov_lookup = setup_hybrid_model(
+    elif args.pruning_method == "frequency_oov":
+        model, token_map, oov_lookup = setup_frequency_oov_model(
             args.task, 
             args.model_name,
             prune_percent=args.prune_percent,
             num_clusters=args.num_clusters
+        )
+    elif args.pruning_method == "importance_oov":
+        model, token_map, oov_lookup = setup_importance_oov_model(
+            args.task, 
+            args.model_name,
+            prune_percent=args.prune_percent,
+            num_clusters=args.num_clusters,
+            importance_type=args.importance_type
         )
     elif args.pruning_method == "importance":
         model, token_map, oov_lookup = setup_importance_based_model(
             args.task, 
             args.model_name,
             prune_percent=args.prune_percent,
-            num_clusters=args.num_clusters,
             importance_type=args.importance_type
+        )
+    elif args.pruning_method == "random":
+        model, token_map, oov_lookup = setup_random_based_model(
+            args.task, 
+            args.model_name,
+            prune_percent=args.prune_percent,
+            random_seed=args.seed
+        )
+    elif args.pruning_method == "attention":
+        model, token_map, oov_lookup = setup_attention_based_model(
+            args.task, 
+            args.model_name,
+            attention_model=args.attention_model,
+            prune_percent=args.prune_percent
         )
     
     # Always use custom splits now
@@ -731,9 +787,9 @@ def run_standard_pipeline(args, tokenizer):
         logger.info(f"Task: {args.task}")
         logger.info(f"Pruning method: {args.pruning_method}")
         logger.info(f"Prune percent: {args.prune_percent}%")
-        if args.pruning_method in ["hybrid", "importance"]:
+        if args.pruning_method in ["frequency_oov", "importance_oov"]:
             logger.info(f"Num OOV clusters: {args.num_clusters}")
-        if args.pruning_method == "importance":
+        if args.pruning_method == "importance_oov":
             logger.info(f"Importance type: {args.importance_type}")
         logger.info(f"Vocabulary reduction: {(1 - len(token_map)/len(tokenizer.get_vocab()))*100:.2f}%")
         
@@ -820,10 +876,17 @@ def run_pipeline(args):
     log_filename = f"{args.output_dir}/{args.task}_{args.pruning_method}_prune{args.prune_percent}.log"
     if args.pruning_method == "clustering":
         log_filename = f"{args.output_dir}/{args.task}_clustering_prune{args.prune_percent}_{args.clustering_method}.log"
-    elif args.pruning_method == "hybrid":
-        log_filename = f"{args.output_dir}/{args.task}_hybrid_prune{args.prune_percent}_clusters{args.num_clusters}.log"
+    elif args.pruning_method == "frequency_oov":
+        log_filename = f"{args.output_dir}/{args.task}_frequency_oov_prune{args.prune_percent}_clusters{args.num_clusters}.log"
+    elif args.pruning_method == "importance_oov":
+        log_filename = f"{args.output_dir}/{args.task}_importance_oov_prune{args.prune_percent}_clusters{args.num_clusters}_type{args.importance_type}.log"
     elif args.pruning_method == "importance":
-        log_filename = f"{args.output_dir}/{args.task}_importance_prune{args.prune_percent}_clusters{args.num_clusters}_type{args.importance_type}.log"
+        log_filename = f"{args.output_dir}/{args.task}_importance_prune{args.prune_percent}_type{args.importance_type}.log"
+    elif args.pruning_method == "random":
+        log_filename = f"{args.output_dir}/{args.task}_random_prune{args.prune_percent}.log"
+    elif args.pruning_method == "attention":
+        attention_model_suffix = "_finetuned" if args.attention_model else ""
+        log_filename = f"{args.output_dir}/{args.task}_attention_prune{args.prune_percent}{attention_model_suffix}.log"
     
     # Add CV info to log filename if using cross-validation
     if args.cross_validation:

@@ -1,7 +1,7 @@
 """
-Hybrid vocabulary pruning.
+Frequency-based OOV vocabulary pruning.
 
-This module implements hybrid pruning, which combines frequency-based pruning
+This module implements frequency-based OOV pruning, which combines frequency-based pruning
 with clustering of OOV tokens.
 """
 
@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 def cluster_removed_tokens(tokens_to_remove, model, num_clusters=50):
     """
     Cluster removed tokens to create mapping for OOV tokens.
-    Used by hybrid pruning methods.
+    Used by frequency_oov pruning methods.
     
     Args:
         tokens_to_remove: List of token IDs that were removed
@@ -92,9 +92,9 @@ def cluster_removed_tokens(tokens_to_remove, model, num_clusters=50):
     
     return oov_token_map, cluster_centers
 
-def setup_hybrid_model(task_name, model_name, prune_percent=20, num_clusters=50):
+def setup_frequency_oov_model(task_name, model_name, prune_percent=20, num_clusters=50):
     """
-    Set up a model with hybrid vocabulary pruning.
+    Set up a model with frequency-based OOV vocabulary pruning.
     
     Args:
         task_name: Name of the GLUE task
@@ -103,11 +103,11 @@ def setup_hybrid_model(task_name, model_name, prune_percent=20, num_clusters=50)
         num_clusters: Number of clusters for OOV token mapping
         
     Returns:
-        model: Model with hybrid vocabulary
+        model: Model with frequency OOV vocabulary
         token_map: Mapping from original token IDs to new IDs
         oov_lookup: Mapping from OOV token ID to cluster representative ID
     """
-    logger.info(f"Setting up hybrid model for {task_name} with {prune_percent}% pruning and {num_clusters} OOV clusters")
+    logger.info(f"Setting up frequency-OOV model for {task_name} with {prune_percent}% pruning and {num_clusters} OOV clusters")
     
     # Load GLUE task metadata
     task_meta = get_task_metadata(task_name)
