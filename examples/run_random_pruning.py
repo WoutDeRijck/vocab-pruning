@@ -31,6 +31,25 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Define all GLUE tasks
+GLUE_TASKS = ["cola", "mnli", "mrpc", "qnli", "qqp", "rte", "sst2", "stsb", "wnli"]
+
+BATCH_SIZE = 64
+PRUNE_PERCENT = 20
+
+# Default settings for each task (customize as needed)
+TASK_DEFAULTS = {
+    "cola": {"batch_size": BATCH_SIZE, "learning_rate": 8e-5, "epochs": 5, "prune_percent": PRUNE_PERCENT},
+    "mnli": {"batch_size": BATCH_SIZE, "learning_rate": 5e-5, "epochs": 1, "prune_percent": PRUNE_PERCENT},
+    "mrpc": {"batch_size": BATCH_SIZE, "learning_rate": 5e-5, "epochs": 10, "prune_percent": PRUNE_PERCENT},
+    "qnli": {"batch_size": BATCH_SIZE, "learning_rate": 8e-5, "epochs": 2, "prune_percent": PRUNE_PERCENT},
+    "qqp": {"batch_size": BATCH_SIZE, "learning_rate": 5e-5, "epochs": 10, "prune_percent": PRUNE_PERCENT},
+    "rte": {"batch_size": BATCH_SIZE, "learning_rate": 5e-5, "epochs": 3, "prune_percent": PRUNE_PERCENT},
+    "sst2": {"batch_size": BATCH_SIZE, "learning_rate": 8e-5, "epochs": 2, "prune_percent": PRUNE_PERCENT},
+    "stsb": {"batch_size": BATCH_SIZE, "learning_rate": 8e-5, "epochs": 10, "prune_percent": PRUNE_PERCENT},
+    "wnli": {"batch_size": BATCH_SIZE, "learning_rate": 5e-5, "epochs": 3, "prune_percent": PRUNE_PERCENT}
+}
+
 def parse_args():
     """Parse command line arguments for Random pruning."""
     parser = argparse.ArgumentParser(
@@ -42,7 +61,7 @@ def parse_args():
         "--task", 
         type=str, 
         default="mrpc", 
-        choices=["cola", "mnli", "mrpc", "qnli", "qqp", "rte", "sst2", "stsb", "wnli"],
+        choices=GLUE_TASKS,
         help="GLUE task name"
     )
     
@@ -57,23 +76,23 @@ def parse_args():
     parser.add_argument(
         "--prune_percent", 
         type=float, 
-        default=20,
-        help="Percentage of vocabulary to prune"
+        default=None,
+        help="Percentage of vocabulary to prune (overrides task defaults)"
     )
     
     # Training arguments
     parser.add_argument(
         "--epochs", 
         type=int, 
-        default=3,
-        help="Number of training epochs"
+        default=None,
+        help="Number of training epochs (overrides task defaults)"
     )
     
     parser.add_argument(
         "--learning_rate", 
         type=float, 
-        default=8e-5,
-        help="Learning rate"
+        default=None,
+        help="Learning rate (overrides task defaults)"
     )
     
     parser.add_argument(
@@ -86,8 +105,8 @@ def parse_args():
     parser.add_argument(
         "--batch_size", 
         type=int, 
-        default=32,
-        help="Training batch size"
+        default=None,
+        help="Training batch size (overrides task defaults)"
     )
     
     # Cross-validation arguments
@@ -143,21 +162,28 @@ def main():
     # Set random seed
     set_seed(args.seed)
     
+    # Apply task-specific defaults unless overridden
+    task_name = args.task
+    batch_size = args.batch_size if args.batch_size is not None else TASK_DEFAULTS[task_name]["batch_size"]
+    learning_rate = args.learning_rate if args.learning_rate is not None else TASK_DEFAULTS[task_name]["learning_rate"]
+    epochs = args.epochs if args.epochs is not None else TASK_DEFAULTS[task_name]["epochs"]
+    prune_percent = args.prune_percent if args.prune_percent is not None else TASK_DEFAULTS[task_name]["prune_percent"]
+    
     # Create timestamped output directory
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    output_dir = f"../results/{args.task}_random_prune{args.prune_percent}_{timestamp}"
+    output_dir = f"../results/{task_name}_random_prune{prune_percent}_{timestamp}"
     os.makedirs(output_dir, exist_ok=True)
     
     # Set up configuration for the run
     config = argparse.Namespace(
-        task=args.task,
+        task=task_name,
         model_name=args.model_name,
         pruning_method="random",  # Specify pruning method as random
-        prune_percent=args.prune_percent,
-        epochs=args.epochs,
-        learning_rate=args.learning_rate,
+        prune_percent=prune_percent,
+        epochs=epochs,
+        learning_rate=learning_rate,
         weight_decay=args.weight_decay,
-        batch_size=args.batch_size,
+        batch_size=batch_size,
         cross_validation=args.cross_validation,
         n_folds=args.n_folds,
         train_ratio=args.train_ratio,
@@ -168,7 +194,7 @@ def main():
     )
     
     # Log configuration
-    logger.info(f"Running Random-based pruning on {args.task} with {args.prune_percent}% pruning")
+    logger.info(f"Running Random-based pruning on {task_name} with {prune_percent}% pruning")
     logger.info(f"Output directory: {output_dir}")
     
     for key, value in vars(config).items():

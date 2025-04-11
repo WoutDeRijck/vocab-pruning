@@ -2,19 +2,27 @@
 # coding: utf-8
 
 """
-Word Importance-based OOV Vocabulary Pruning Script
+Word Importance-based Vocabulary Pruning Example Script (Without OOV)
 
-This script runs word importance-based OOV vocabulary pruning on all GLUE benchmark tasks.
-Each task has customized hyperparameters for optimal performance.
+This script demonstrates how to use the word importance-based vocabulary pruning technique
+without OOV clustering on GLUE benchmark tasks. Tokens are pruned based on TF-IDF importance,
+with OOV tokens mapped to UNK (unlike importance_oov which maps them to cluster representatives).
 
-This pruning method uses TF-IDF to determine which tokens are most important and
-applies OOV token clustering.
+Example usage:
+    python run_importance_pruning.py --task mrpc --prune_percent 20 --importance_type 3
 """
 
+import os
+import sys
 import argparse
 import logging
-import subprocess
-import os
+from datetime import datetime
+
+# Add parent directory to path to import modules
+sys.path.append('..')
+
+from main import run_pipeline
+from utils import set_seed
 
 # Configure logging
 logging.basicConfig(
@@ -23,108 +31,93 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Define all GLUE tasks
+GLUE_TASKS = ["cola", "mnli", "mrpc", "qnli", "qqp", "rte", "sst2", "stsb", "wnli"]
+
 BATCH_SIZE = 64
 PRUNE_PERCENT = 20
-NUM_CLUSTERS = 50
 IMPORTANCE_TYPE = 3
 
-# Dictionary of task-specific parameters
-TASK_PARAMS = {
+# Default settings for each task (customize as needed)
+TASK_DEFAULTS = {
     "cola": {
+        "batch_size": BATCH_SIZE, 
+        "learning_rate": 8e-5, 
         "epochs": 5,
-        "learning_rate": 8e-5,
-        "batch_size": BATCH_SIZE,
-        "weight_decay": 1e-6,
         "prune_percent": PRUNE_PERCENT,
-        "num_clusters": NUM_CLUSTERS,
-        "importance_type": IMPORTANCE_TYPE,
+        "importance_type": IMPORTANCE_TYPE
     },
     "mnli": {
+        "batch_size": BATCH_SIZE, 
+        "learning_rate": 5e-5, 
         "epochs": 1,
-        "learning_rate": 5e-5,
-        "batch_size": BATCH_SIZE,
-        "weight_decay": 5e-6,
         "prune_percent": PRUNE_PERCENT,
-        "num_clusters": NUM_CLUSTERS,
-        "importance_type": IMPORTANCE_TYPE,
+        "importance_type": IMPORTANCE_TYPE
     },
     "mrpc": {
+        "batch_size": BATCH_SIZE, 
+        "learning_rate": 5e-5, 
         "epochs": 10,
-        "learning_rate": 5e-5,
-        "batch_size": BATCH_SIZE,
-        "weight_decay": 5e-6,
         "prune_percent": PRUNE_PERCENT,
-        "num_clusters": NUM_CLUSTERS,
-        "importance_type": IMPORTANCE_TYPE,
+        "importance_type": IMPORTANCE_TYPE
     },
     "qnli": {
+        "batch_size": BATCH_SIZE, 
+        "learning_rate": 8e-5, 
         "epochs": 2,
-        "learning_rate": 8e-5,
-        "batch_size": BATCH_SIZE,
-        "weight_decay": 5e-6,
         "prune_percent": PRUNE_PERCENT,
-        "num_clusters": NUM_CLUSTERS,
-        "importance_type": IMPORTANCE_TYPE,
+        "importance_type": IMPORTANCE_TYPE
     },
     "qqp": {
+        "batch_size": BATCH_SIZE, 
+        "learning_rate": 5e-5, 
         "epochs": 10,
-        "learning_rate": 5e-5,
-        "batch_size": BATCH_SIZE,
-        "weight_decay": 5e-6,
         "prune_percent": PRUNE_PERCENT,
-        "num_clusters": NUM_CLUSTERS,
-        "importance_type": IMPORTANCE_TYPE,
+        "importance_type": IMPORTANCE_TYPE
     },
     "rte": {
+        "batch_size": BATCH_SIZE, 
+        "learning_rate": 5e-5, 
         "epochs": 3,
-        "learning_rate": 5e-5,
-        "batch_size": BATCH_SIZE,
-        "weight_decay": 1e-5,
         "prune_percent": PRUNE_PERCENT,
-        "num_clusters": NUM_CLUSTERS,
-        "importance_type": IMPORTANCE_TYPE,
+        "importance_type": IMPORTANCE_TYPE
     },
     "sst2": {
+        "batch_size": BATCH_SIZE, 
+        "learning_rate": 8e-5, 
         "epochs": 2,
-        "learning_rate": 8e-5,
-        "batch_size": BATCH_SIZE,
-        "weight_decay": 1e-5,
         "prune_percent": PRUNE_PERCENT,
-        "num_clusters": NUM_CLUSTERS,
-        "importance_type": IMPORTANCE_TYPE,
+        "importance_type": IMPORTANCE_TYPE
     },
     "stsb": {
+        "batch_size": BATCH_SIZE, 
+        "learning_rate": 8e-5, 
         "epochs": 10,
-        "learning_rate": 8e-5,
-        "batch_size": BATCH_SIZE,
-        "weight_decay": 5e-6,
         "prune_percent": PRUNE_PERCENT,
-        "num_clusters": NUM_CLUSTERS,
-        "importance_type": IMPORTANCE_TYPE,
+        "importance_type": IMPORTANCE_TYPE
     },
     "wnli": {
+        "batch_size": BATCH_SIZE, 
+        "learning_rate": 5e-5, 
         "epochs": 3,
-        "learning_rate": 5e-5,
-        "batch_size": BATCH_SIZE,
-        "weight_decay": 1e-5,
         "prune_percent": PRUNE_PERCENT,
-        "num_clusters": NUM_CLUSTERS,
-        "importance_type": IMPORTANCE_TYPE,
-    },
+        "importance_type": IMPORTANCE_TYPE
+    }
 }
 
 def parse_args():
-    """Parse command line arguments."""
+    """Parse command line arguments for Word Importance pruning without OOV."""
     parser = argparse.ArgumentParser(
-        description="Run word importance-based OOV vocabulary pruning on GLUE tasks"
+        description="Train and evaluate models with Word Importance-based vocabulary pruning (without OOV)"
     )
     
+    # Task and model arguments
     parser.add_argument(
-        "--tasks", 
+        "--task", 
         type=str, 
-        nargs="+",
-        default=list(TASK_PARAMS.keys()),
-        help="GLUE tasks to run (default: all)"
+        default="mrpc", 
+        choices=GLUE_TASKS,
+        help="GLUE task name"
     )
     
     parser.add_argument(
@@ -134,53 +127,12 @@ def parse_args():
         help="Pretrained model name or path"
     )
     
-    parser.add_argument(
-        "--output_dir", 
-        type=str, 
-        default="./importance_oov_pruning_output",
-        help="Output directory for model checkpoints and logs"
-    )
-    
+    # Pruning arguments
     parser.add_argument(
         "--prune_percent", 
         type=float, 
         default=None,
-        help="Override the default prune percentage for all tasks"
-    )
-    
-    parser.add_argument(
-        "--epochs", 
-        type=int, 
-        default=None,
-        help="Override the default number of epochs for all tasks"
-    )
-    
-    parser.add_argument(
-        "--learning_rate", 
-        type=float, 
-        default=None,
-        help="Override the default learning rate for all tasks"
-    )
-    
-    parser.add_argument(
-        "--batch_size", 
-        type=int, 
-        default=None,
-        help="Override the default batch size for all tasks"
-    )
-    
-    parser.add_argument(
-        "--weight_decay", 
-        type=float, 
-        default=None,
-        help="Override the default weight decay for all tasks"
-    )
-    
-    parser.add_argument(
-        "--num_clusters", 
-        type=int, 
-        default=None,
-        help="Override the default number of clusters for all tasks"
+        help="Percentage of vocabulary to prune (overrides task defaults)"
     )
     
     parser.add_argument(
@@ -188,9 +140,75 @@ def parse_args():
         type=int, 
         default=None,
         choices=[0, 1, 2, 3],
-        help="Override the default importance type for all tasks (0=off, 1=no norm, 2=L1 norm, 3=L2 norm)"
+        help="Word importance calculation type: 0=off, 1=no norm, 2=L1 norm, 3=L2 norm (overrides task defaults)"
     )
     
+    # Training arguments
+    parser.add_argument(
+        "--epochs", 
+        type=int, 
+        default=None,
+        help="Number of training epochs (overrides task defaults)"
+    )
+    
+    parser.add_argument(
+        "--learning_rate", 
+        type=float, 
+        default=None,
+        help="Learning rate (overrides task defaults)"
+    )
+    
+    parser.add_argument(
+        "--weight_decay", 
+        type=float, 
+        default=8e-6,
+        help="Weight decay"
+    )
+    
+    parser.add_argument(
+        "--batch_size", 
+        type=int, 
+        default=None,
+        help="Training batch size (overrides task defaults)"
+    )
+    
+    # Cross-validation arguments
+    parser.add_argument(
+        "--cross_validation", 
+        action="store_true",
+        help="Use cross-validation"
+    )
+    
+    parser.add_argument(
+        "--n_folds", 
+        type=int, 
+        default=5,
+        help="Number of folds for cross-validation"
+    )
+    
+    # Data split arguments
+    parser.add_argument(
+        "--train_ratio", 
+        type=float, 
+        default=0.8,
+        help="Ratio of data to use for training"
+    )
+    
+    parser.add_argument(
+        "--validation_ratio", 
+        type=float, 
+        default=0.1,
+        help="Ratio of data to use for validation"
+    )
+    
+    parser.add_argument(
+        "--test_ratio", 
+        type=float, 
+        default=0.1,
+        help="Ratio of data to use for testing"
+    )
+    
+    # Misc arguments
     parser.add_argument(
         "--seed", 
         type=int, 
@@ -201,77 +219,59 @@ def parse_args():
     return parser.parse_args()
 
 def main():
-    """Run word importance-based OOV pruning on specified GLUE tasks."""
+    """Main function to run Word Importance-based pruning without OOV."""
     args = parse_args()
     
-    # Create output directory
-    os.makedirs(args.output_dir, exist_ok=True)
+    # Set random seed
+    set_seed(args.seed)
     
-    # Log arguments
-    logger.info(f"Running with arguments: {args}")
+    # Apply task-specific defaults unless overridden
+    task_name = args.task
+    batch_size = args.batch_size if args.batch_size is not None else TASK_DEFAULTS[task_name]["batch_size"]
+    learning_rate = args.learning_rate if args.learning_rate is not None else TASK_DEFAULTS[task_name]["learning_rate"]
+    epochs = args.epochs if args.epochs is not None else TASK_DEFAULTS[task_name]["epochs"]
+    prune_percent = args.prune_percent if args.prune_percent is not None else TASK_DEFAULTS[task_name]["prune_percent"]
+    importance_type = args.importance_type if args.importance_type is not None else TASK_DEFAULTS[task_name]["importance_type"]
     
-    # Run each task
-    for task in args.tasks:
-        if task not in TASK_PARAMS:
-            logger.warning(f"Task {task} not found in task parameters, skipping.")
-            continue
-        
-        # Get task parameters
-        task_params = TASK_PARAMS[task].copy()
-        
-        # Override task parameters if specified
-        if args.prune_percent is not None:
-            task_params["prune_percent"] = args.prune_percent
-        if args.epochs is not None:
-            task_params["epochs"] = args.epochs
-        if args.learning_rate is not None:
-            task_params["learning_rate"] = args.learning_rate
-        if args.batch_size is not None:
-            task_params["batch_size"] = args.batch_size
-        if args.weight_decay is not None:
-            task_params["weight_decay"] = args.weight_decay
-        if args.num_clusters is not None:
-            task_params["num_clusters"] = args.num_clusters
-        if args.importance_type is not None:
-            task_params["importance_type"] = args.importance_type
-        
-        # Create task-specific output directory
-        task_output_dir = os.path.join(args.output_dir, task)
-        os.makedirs(task_output_dir, exist_ok=True)
-        
-        # Log task parameters
-        logger.info(f"\n{'=' * 50}")
-        logger.info(f"Running word importance-based OOV pruning for task: {task}")
-        logger.info(f"Parameters: {task_params}")
-        logger.info(f"{'=' * 50}")
-        
-        # Build command for the main script
-        cmd = [
-            "python", "../main.py",
-            "--task", task,
-            "--model_name", args.model_name,
-            "--pruning_method", "importance_oov",
-            "--prune_percent", str(task_params["prune_percent"]),
-            "--epochs", str(task_params["epochs"]),
-            "--learning_rate", str(task_params["learning_rate"]),
-            "--batch_size", str(task_params["batch_size"]),
-            "--weight_decay", str(task_params["weight_decay"]),
-            "--num_clusters", str(task_params["num_clusters"]),
-            "--importance_type", str(task_params["importance_type"]),
-            "--output_dir", task_output_dir,
-            "--seed", str(args.seed),
-        ]
-        
-        # Run the command
-        logger.info(f"Running command: {' '.join(cmd)}")
-        try:
-            subprocess.run(cmd, check=True)
-            logger.info(f"Successfully completed word importance-based OOV pruning for task: {task}")
-        except subprocess.CalledProcessError as e:
-            logger.error(f"Error running word importance-based OOV pruning for task {task}: {e}")
-            continue
+    # Create timestamped output directory
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    output_dir = f"../results/{task_name}_importance_prune{prune_percent}_type{importance_type}_{timestamp}"
+    os.makedirs(output_dir, exist_ok=True)
     
-    logger.info("\nAll tasks completed!")
+    # Set up configuration for the run
+    config = argparse.Namespace(
+        task=task_name,
+        model_name=args.model_name,
+        pruning_method="importance",  # Specify pruning method as importance (no OOV)
+        prune_percent=prune_percent,
+        importance_type=importance_type,
+        epochs=epochs,
+        learning_rate=learning_rate,
+        weight_decay=args.weight_decay,
+        batch_size=batch_size,
+        cross_validation=args.cross_validation,
+        n_folds=args.n_folds,
+        train_ratio=args.train_ratio,
+        validation_ratio=args.validation_ratio,
+        test_ratio=args.test_ratio,
+        output_dir=output_dir,
+        seed=args.seed
+    )
+    
+    # Log configuration
+    logger.info(f"Running Word Importance-based pruning (without OOV) on {task_name} with {prune_percent}% pruning")
+    logger.info(f"Importance type: {importance_type}")
+    logger.info(f"Output directory: {output_dir}")
+    
+    for key, value in vars(config).items():
+        logger.info(f"{key}: {value}")
+    
+    # Run the pruning pipeline
+    results_df, model = run_pipeline(config)
+    
+    logger.info(f"Word Importance-based pruning (without OOV) completed successfully")
+    
+    return results_df, model
 
 if __name__ == "__main__":
     main() 

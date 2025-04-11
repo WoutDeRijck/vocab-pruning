@@ -2,17 +2,14 @@
 # coding: utf-8
 
 """
-Attention-based Vocabulary Pruning for All GLUE Tasks
+Attention-based Vocabulary Pruning Example Script
 
-This script runs attention-based vocabulary pruning on all GLUE benchmark tasks.
-It can be executed with a single command to process all tasks or a specific task.
+This script demonstrates how to use the attention-based vocabulary pruning technique
+on GLUE benchmark tasks. This approach uses attention patterns from a fine-tuned model
+to determine token importance in context.
 
 Example usage:
-    # Run a specific task
-    python run_attention_pruning_for_all_tasks.py --task mrpc --prune_percent 20 --attention_model_path path/to/finetuned/model
-    
-    # Run all tasks
-    python run_attention_pruning_for_all_tasks.py --run_all --prune_percent 20
+    python run_attention_pruning.py --task mrpc --prune_percent 20 --finetuned_model_path path/to/finetuned/model
 """
 
 import os
@@ -38,107 +35,111 @@ logger = logging.getLogger(__name__)
 GLUE_TASKS = ["cola", "mnli", "mrpc", "qnli", "qqp", "rte", "sst2", "stsb", "wnli"]
 
 BATCH_SIZE = 64
+PRUNE_PERCENT = 20
 
 # Default settings for each task (customize as needed)
-# You can fill in the model_name fields with paths to task-specific fine-tuned models
+# Fill in the finetuned_model field with paths to task-specific fine-tuned models
 TASK_DEFAULTS = {
     "cola": {
         "batch_size": BATCH_SIZE, 
         "learning_rate": 8e-5, 
         "epochs": 5,
-        "model_name": ""  # Path to fine-tuned model for CoLA
+        "prune_percent": PRUNE_PERCENT,
+        "finetuned_model": ""  # Path to fine-tuned model for CoLA
     },
     "mnli": {
         "batch_size": BATCH_SIZE, 
         "learning_rate": 5e-5, 
         "epochs": 1,
-        "model_name": ""  # Path to fine-tuned model for MNLI
+        "prune_percent": PRUNE_PERCENT,
+        "finetuned_model": ""  # Path to fine-tuned model for MNLI
     },
     "mrpc": {
         "batch_size": BATCH_SIZE, 
-        "learning_rate": 8e-5, 
+        "learning_rate": 5e-5, 
         "epochs": 10,
-        "model_name": ""  # Path to fine-tuned model for MRPC
+        "prune_percent": PRUNE_PERCENT,
+        "finetuned_model": ""  # Path to fine-tuned model for MRPC
     },
     "qnli": {
         "batch_size": BATCH_SIZE, 
-        "learning_rate": 5e-5, 
+        "learning_rate": 8e-5, 
         "epochs": 2,
-        "model_name": ""  # Path to fine-tuned model for QNLI
+        "prune_percent": PRUNE_PERCENT,
+        "finetuned_model": ""  # Path to fine-tuned model for QNLI
     },
     "qqp": {
         "batch_size": BATCH_SIZE, 
         "learning_rate": 5e-5, 
         "epochs": 10,
-        "model_name": ""  # Path to fine-tuned model for QQP
+        "prune_percent": PRUNE_PERCENT,
+        "finetuned_model": ""  # Path to fine-tuned model for QQP
     },
     "rte": {
         "batch_size": BATCH_SIZE, 
-        "learning_rate": 1e-4, 
+        "learning_rate": 5e-5, 
         "epochs": 3,
-        "model_name": ""  # Path to fine-tuned model for RTE
+        "prune_percent": PRUNE_PERCENT,
+        "finetuned_model": ""  # Path to fine-tuned model for RTE
     },
     "sst2": {
         "batch_size": BATCH_SIZE, 
         "learning_rate": 8e-5, 
         "epochs": 2,
-        "model_name": ""  # Path to fine-tuned model for SST-2
+        "prune_percent": PRUNE_PERCENT,
+        "finetuned_model": ""  # Path to fine-tuned model for SST-2
     },
     "stsb": {
         "batch_size": BATCH_SIZE, 
-        "learning_rate": 1e-4, 
+        "learning_rate": 8e-5, 
         "epochs": 10,
-        "model_name": ""  # Path to fine-tuned model for STS-B
+        "prune_percent": PRUNE_PERCENT,
+        "finetuned_model": ""  # Path to fine-tuned model for STS-B
     },
     "wnli": {
         "batch_size": BATCH_SIZE, 
-        "learning_rate": 1e-4, 
+        "learning_rate": 5e-5, 
         "epochs": 3,
-        "model_name": ""  # Path to fine-tuned model for WNLI
+        "prune_percent": PRUNE_PERCENT,
+        "finetuned_model": ""  # Path to fine-tuned model for WNLI
     }
 }
 
 def parse_args():
     """Parse command line arguments for Attention-based pruning."""
     parser = argparse.ArgumentParser(
-        description="Train and evaluate models with Attention-based vocabulary pruning for all GLUE tasks"
+        description="Train and evaluate models with Attention-based vocabulary pruning"
     )
     
-    # Task arguments
-    task_group = parser.add_mutually_exclusive_group(required=True)
-    task_group.add_argument(
+    # Task and model arguments
+    parser.add_argument(
         "--task", 
-        type=str,
+        type=str, 
+        default="mrpc", 
         choices=GLUE_TASKS,
-        help="Specific GLUE task to run"
-    )
-    task_group.add_argument(
-        "--run_all",
-        action="store_true",
-        help="Run all GLUE tasks sequentially"
+        help="GLUE task name"
     )
     
-    # Model arguments
     parser.add_argument(
         "--model_name", 
         type=str, 
         default="answerdotai/ModernBERT-base",
-        help="Pretrained model name or path (used if task-specific model not provided)"
+        help="Base model name or path (only used if no fine-tuned model is provided)"
     )
     
     parser.add_argument(
-        "--attention_model_path", 
+        "--finetuned_model_path", 
         type=str, 
         default=None,
-        help="Path to a fine-tuned model to use for attention-based importance calculation"
+        help="Path to a fine-tuned model to use for both embedding extraction and attention-based importance calculation"
     )
     
     # Pruning arguments
     parser.add_argument(
         "--prune_percent", 
         type=float, 
-        default=20,
-        help="Percentage of vocabulary to prune"
+        default=None,
+        help="Percentage of vocabulary to prune (overrides task defaults)"
     )
     
     # Training arguments
@@ -214,39 +215,35 @@ def parse_args():
         help="Random seed"
     )
     
-    parser.add_argument(
-        "--results_dir",
-        type=str,
-        default="../results",
-        help="Base directory for results"
-    )
-    
     return parser.parse_args()
 
-def run_task(task_name, args):
-    """Run attention-based pruning for a specific task."""
-    logger.info(f"{'='*50}")
-    logger.info(f"Running attention-based pruning for {task_name}")
-    logger.info(f"{'='*50}")
+def main():
+    """Main function to run Attention-based pruning."""
+    args = parse_args()
     
     # Set random seed
     set_seed(args.seed)
     
     # Apply task-specific defaults unless overridden
+    task_name = args.task
     batch_size = args.batch_size if args.batch_size is not None else TASK_DEFAULTS[task_name]["batch_size"]
     learning_rate = args.learning_rate if args.learning_rate is not None else TASK_DEFAULTS[task_name]["learning_rate"]
     epochs = args.epochs if args.epochs is not None else TASK_DEFAULTS[task_name]["epochs"]
+    prune_percent = args.prune_percent if args.prune_percent is not None else TASK_DEFAULTS[task_name]["prune_percent"]
     
-    # Use task-specific model if available, otherwise fall back to command line argument
-    model_name = TASK_DEFAULTS[task_name]["model_name"] if TASK_DEFAULTS[task_name]["model_name"] else args.model_name
+    # Use task-specific fine-tuned model if available, otherwise use command line argument
+    finetuned_model = args.finetuned_model_path
+    if not finetuned_model and TASK_DEFAULTS[task_name]["finetuned_model"]:
+        finetuned_model = TASK_DEFAULTS[task_name]["finetuned_model"]
     
-    # Determine attention model - if not explicitly provided, use base model
-    attention_model = args.attention_model_path
+    # Determine which model to use for embeddings and attention calculation
+    model_name = finetuned_model if finetuned_model else args.model_name
+    attention_model = finetuned_model  # Always use the same model for attention
     
     # Create timestamped output directory
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    model_suffix = "_finetuned" if attention_model else ""
-    output_dir = f"{args.results_dir}/{task_name}_attention_prune{args.prune_percent}{model_suffix}_{timestamp}"
+    model_suffix = "_finetuned" if finetuned_model else ""
+    output_dir = f"../results/{task_name}_attention_prune{prune_percent}{model_suffix}_{timestamp}"
     os.makedirs(output_dir, exist_ok=True)
     
     # Set up configuration for the run
@@ -254,8 +251,8 @@ def run_task(task_name, args):
         task=task_name,
         model_name=model_name,
         pruning_method="attention",  # Specify pruning method as attention
-        prune_percent=args.prune_percent,
-        attention_model=attention_model,  # Pass the fine-tuned model path
+        prune_percent=prune_percent,
+        attention_model=attention_model,  # Pass the fine-tuned model path to attention calculation
         epochs=epochs,
         learning_rate=learning_rate,
         weight_decay=args.weight_decay,
@@ -270,42 +267,20 @@ def run_task(task_name, args):
     )
     
     # Log configuration
-    logger.info(f"Running with configuration:")
+    logger.info(f"Running Attention-based pruning on {task_name} with {prune_percent}% pruning")
+    if finetuned_model:
+        logger.info(f"Using fine-tuned model: {finetuned_model}")
+    logger.info(f"Output directory: {output_dir}")
+    
     for key, value in vars(config).items():
-        logger.info(f"  {key}: {value}")
+        logger.info(f"{key}: {value}")
     
     # Run the pruning pipeline
-    try:
-        results_df, model = run_pipeline(config)
-        logger.info(f"Attention-based pruning for {task_name} completed successfully")
-        return results_df, model
-    except Exception as e:
-        logger.error(f"Error processing {task_name}: {e}")
-        return None, None
-
-def main():
-    """Main function to run Attention-based pruning for all tasks."""
-    args = parse_args()
+    results_df, model = run_pipeline(config)
     
-    # Determine which tasks to run
-    tasks_to_run = GLUE_TASKS if args.run_all else [args.task]
+    logger.info(f"Attention-based pruning completed successfully")
     
-    results = {}
-    
-    # Run each task
-    for task in tasks_to_run:
-        results_df, model = run_task(task, args)
-        results[task] = (results_df, model)
-    
-    # Print summary
-    logger.info("\n" + "="*80)
-    logger.info("Attention-based pruning summary:")
-    for task in tasks_to_run:
-        status = "✅ Completed" if results[task][0] is not None else "❌ Failed"
-        logger.info(f"{task}: {status}")
-    logger.info("="*80)
-    
-    return results
+    return results_df, model
 
 if __name__ == "__main__":
     main() 
