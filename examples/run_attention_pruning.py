@@ -42,7 +42,7 @@ MAIN_SCRIPT_PATH = os.path.join(PROJECT_ROOT, "main.py")
 # Define all GLUE tasks
 GLUE_TASKS = ["cola", "mnli", "mrpc", "qnli", "qqp", "rte", "sst2", "stsb", "wnli"]
 
-BATCH_SIZE = 64
+BATCH_SIZE = 128
 PRUNE_PERCENT = 20
 
 # Default settings for each task (customize as needed)

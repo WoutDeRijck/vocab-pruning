@@ -69,6 +69,8 @@ def create_consistent_splits(
         valid_split_name = "validation_matched"
     elif task_name == "mnli-mismatched":
         valid_split_name = "validation_mismatched"
+    elif task_name == "mnli":
+        valid_split_name = "validation_matched"  # Default to matched for plain "mnli"
     else:
         valid_split_name = "validation"
     
@@ -305,6 +307,8 @@ def create_cross_validation_splits(
         valid_split_name = "validation_matched"
     elif task_name == "mnli-mismatched":
         valid_split_name = "validation_mismatched"
+    elif task_name == "mnli":
+        valid_split_name = "validation_matched"  # Default to matched for plain "mnli"
     else:
         valid_split_name = "validation"
     

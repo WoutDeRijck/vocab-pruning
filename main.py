@@ -458,6 +458,11 @@ def run_cross_validation_pipeline(args, tokenizer):
             
             # Function to remap tokens in a dataset
             def remap_tokens(dataset):
+                # If no token_map (no pruning case), return the dataset unchanged
+                if token_map is None:
+                    logger.info("No token mapping applied (using full vocabulary)")
+                    return dataset
+                
                 # Create a mapping dictionary for quick lookup
                 id_map_dict = token_map.copy()
                 if oov_lookup:
@@ -712,6 +717,11 @@ def run_standard_pipeline(args, tokenizer):
         
         # Function to remap tokens in a dataset
         def remap_tokens(dataset):
+            # If no token_map (no pruning case), return the dataset unchanged
+            if token_map is None:
+                logger.info("No token mapping applied (using full vocabulary)")
+                return dataset
+            
             # Create a mapping dictionary for quick lookup
             id_map_dict = token_map.copy()
             if oov_lookup:
@@ -764,10 +774,14 @@ def run_standard_pipeline(args, tokenizer):
     # Log initial vocabulary statistics
     logger.info(f"\n=== Vocabulary Statistics ===")
     logger.info(f"Original vocabulary size: {len(tokenizer.get_vocab())}")
-    logger.info(f"Kept tokens: {len(token_map)}")
-    if oov_lookup:
-        logger.info(f"OOV clusters: {len(set(oov_lookup.values()))}")
-    logger.info(f"Vocabulary reduction: {(1 - len(token_map)/len(tokenizer.get_vocab()))*100:.2f}%")
+    if token_map is None:
+        logger.info("No tokens pruned (using full vocabulary)")
+        logger.info(f"Vocabulary reduction: 0.00%")
+    else:
+        logger.info(f"Kept tokens: {len(token_map)}")
+        if oov_lookup:
+            logger.info(f"OOV clusters: {len(set(oov_lookup.values()))}")
+        logger.info(f"Vocabulary reduction: {(1 - len(token_map)/len(tokenizer.get_vocab()))*100:.2f}%")
     
     # Log custom split ratios
     logger.info(f"Using custom splits with ratios: train={args.train_ratio}, val={args.validation_ratio}, test={args.test_ratio}")
@@ -810,12 +824,16 @@ def run_standard_pipeline(args, tokenizer):
         logger.info("\n=== Summary Results ===")
         logger.info(f"Task: {args.task}")
         logger.info(f"Pruning method: {args.pruning_method}")
-        logger.info(f"Prune percent: {args.prune_percent}%")
-        if args.pruning_method in ["frequency_oov", "importance_oov"]:
-            logger.info(f"Num OOV clusters: {args.num_clusters}")
-        if args.pruning_method == "importance_oov":
-            logger.info(f"Importance type: {args.importance_type}")
-        logger.info(f"Vocabulary reduction: {(1 - len(token_map)/len(tokenizer.get_vocab()))*100:.2f}%")
+        if args.pruning_method != "no_pruning":
+            logger.info(f"Prune percent: {args.prune_percent}%")
+            if args.pruning_method in ["frequency_oov", "importance_oov"]:
+                logger.info(f"Num OOV clusters: {args.num_clusters}")
+            if args.pruning_method == "importance_oov":
+                logger.info(f"Importance type: {args.importance_type}")
+            logger.info(f"Vocabulary reduction: {(1 - len(token_map)/len(tokenizer.get_vocab()))*100:.2f}%")
+        else:
+            logger.info("No vocabulary pruning applied (baseline method)")
+            logger.info("Vocabulary reduction: 0.00%")
         
         # Extract final metrics
         final_metrics = {}

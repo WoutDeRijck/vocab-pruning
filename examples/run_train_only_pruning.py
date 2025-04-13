@@ -29,7 +29,7 @@ PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 # Get the absolute path to main.py
 MAIN_SCRIPT_PATH = os.path.join(PROJECT_ROOT, "main.py")
 
-BATCH_SIZE = 64
+BATCH_SIZE = 128
 
 # Dictionary of task-specific parameters
 TASK_PARAMS = {
