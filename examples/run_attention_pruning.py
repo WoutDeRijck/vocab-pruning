@@ -16,6 +16,7 @@ import os
 import sys
 import argparse
 import logging
+import subprocess
 from datetime import datetime
 
 # Add parent directory to path to import modules
@@ -30,6 +31,11 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+# Get the absolute path to the project root directory
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+# Get the absolute path to main.py
+MAIN_SCRIPT_PATH = os.path.join(PROJECT_ROOT, "main.py")
 
 # Define all GLUE tasks
 GLUE_TASKS = ["cola", "mnli", "mrpc", "qnli", "qqp", "rte", "sst2", "stsb", "wnli"]
@@ -274,6 +280,22 @@ def main():
     
     for key, value in vars(config).items():
         logger.info(f"{key}: {value}")
+    
+    # Build command for the main script
+    cmd = [
+        "python", MAIN_SCRIPT_PATH,
+        "--task", task_name,
+        "--model_name", model_name,
+        "--pruning_method", "attention",
+        "--prune_percent", str(prune_percent),
+        "--epochs", str(epochs),
+        "--learning_rate", str(learning_rate),
+        "--batch_size", str(batch_size),
+        "--weight_decay", str(args.weight_decay),
+        "--attention_model", attention_model,
+        "--output_dir", output_dir,
+        "--seed", str(args.seed),
+    ]
     
     # Run the pruning pipeline
     results_df, model = run_pipeline(config)

@@ -20,6 +20,11 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Get the absolute path to the project root directory
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+# Get the absolute path to main.py
+MAIN_SCRIPT_PATH = os.path.join(PROJECT_ROOT, "main.py")
+
 BATCH_SIZE = 64
 CLUSTERING_METHOD = "agglomerative"
 PRUNE_PERCENT = 20
@@ -225,7 +230,7 @@ def main():
         
         # Build command for the main script
         cmd = [
-            "python", "../main.py",
+            "python", MAIN_SCRIPT_PATH,
             "--task", task,
             "--model_name", args.model_name,
             "--pruning_method", "clustering",
