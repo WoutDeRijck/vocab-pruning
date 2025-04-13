@@ -13,6 +13,8 @@ The implementation combines several vocabulary pruning techniques:
 5. **Word Importance Pruning (without OOV)**: Uses TF-IDF scores for pruning but maps OOV tokens to UNK
 6. **Random Selection**: Tokens are pruned randomly without consideration for importance, serving as a baseline approach
 7. **Attention-based Pruning**: Uses attention patterns from a fine-tuned model to extract contextual token importance
+8. **Train-only Pruning**: Simply keeps tokens that appear in the training set without any additional pruning
+9. **No-pruning Baseline**: Keeps the full original vocabulary without any changes for baseline comparison
 
 ## Usage
 
@@ -33,7 +35,7 @@ python examples/run_clustering_pruning.py --task mrpc --prune_percent 20
 
 - `--task`: GLUE task name (default: "sst2")
 - `--model_name`: Pretrained model name (default: "answerdotai/ModernBERT-base")
-- `--pruning_method`: Pruning method ["clustering", "frequency", "frequency_oov", "importance_oov", "importance", "random", "attention"] (default: "clustering")
+- `--pruning_method`: Pruning method ["clustering", "frequency", "frequency_oov", "importance_oov", "importance", "random", "attention", "train_only", "no_pruning"] (default: "clustering")
 - `--prune_percent`: Percentage of vocabulary to prune (default: 20)
 - `--epochs`: Number of training epochs (default: 3)
 - `--learning_rate`: Learning rate (default: 8e-5)
@@ -77,8 +79,20 @@ The `examples/` directory contains scripts for running each pruning method on sp
 - `run_importance_pruning.py`: Word importance pruning without OOV clustering
 - `run_random_pruning.py`: Random token selection
 - `run_attention_pruning.py`: Attention-based pruning
+- `run_train_only_pruning.py`: Train-only vocabulary pruning
+- `run_no_pruning.py`: No-pruning baseline
 
-Each script supports the `--task` parameter to specify which GLUE task to run, and contains task-specific defaults for parameters like learning rate, batch size, and pruning percentage. You can override these defaults using command-line arguments.
+Each script supports the `--tasks` parameter to specify which GLUE tasks to run, and contains task-specific defaults for parameters like learning rate, batch size, and pruning percentage. You can override these defaults using command-line arguments.
+
+### Summary Functionality
+
+All example scripts now include a summary functionality that collects and displays results across all GLUE tasks at the end of execution:
+
+- Test metrics (accuracy, F1, etc.) for each task
+- Parameter reduction statistics (vocabulary, embedding, total)
+- Comprehensive results saved to a CSV file with timestamp
+
+This makes it easy to compare the effectiveness of different pruning methods across all GLUE tasks.
 
 ## Examples
 
@@ -136,6 +150,20 @@ python main.py --task mrpc --pruning_method attention --prune_percent 20 --atten
 python examples/run_attention_pruning.py --task mrpc --prune_percent 20 --finetuned_model_path path/to/finetuned/model
 ```
 
+### Train-only Pruning
+```bash
+python main.py --task sst2 --pruning_method train_only --epochs 3
+# Or using example script:
+python examples/run_train_only_pruning.py --tasks sst2 mrpc
+```
+
+### No-pruning Baseline
+```bash
+python main.py --task sst2 --pruning_method no_pruning --epochs 3
+# Or using example script:
+python examples/run_no_pruning.py --tasks sst2 mrpc
+```
+
 ### Using Task-Specific Defaults
 
 Each example script includes task-specific defaults for parameters like learning rate, batch size, epochs, and pruning percentage. You can run scripts with these defaults:
@@ -166,15 +194,16 @@ python examples/run_importance_oov_pruning.py --tasks cola mnli mrpc qnli qqp rt
 python examples/run_clustering_pruning.py --tasks mrpc rte sst2 --prune_percent 25
 ```
 
-Each task will be run sequentially using its task-specific default parameters, which can be overridden with command-line arguments. Results will be saved in task-specific subdirectories within the output directory.
+Each task will be run sequentially using its task-specific default parameters, which can be overridden with command-line arguments. Results will be saved in task-specific subdirectories within the output directory, and a summary of results across all tasks will be displayed at the end.
 
-Scripts that support multiple tasks include:
+Scripts that support multiple tasks with the summary functionality include:
 - `run_clustering_pruning.py`
 - `run_frequency_pruning.py`
 - `run_frequency_oov_pruning.py`
 - `run_importance_oov_pruning.py`
-
-Note that some scripts like `run_importance_pruning.py`, `run_random_pruning.py`, and `run_attention_pruning.py` use a single `--task` parameter instead, and need to be called multiple times for different tasks.
+- `run_random_pruning.py`
+- `run_train_only_pruning.py`
+- `run_no_pruning.py`
 
 ### Using Cross-Validation
 ```bash
@@ -193,6 +222,7 @@ The script produces:
 - Logs with detailed information about pruning and training
 - CSV files with training metrics
 - Test predictions for submission to GLUE benchmark (if test set is available)
+- Summary of results across all tasks (when using example scripts with multiple tasks)
 
 ## How It Works
 
@@ -203,6 +233,7 @@ The script produces:
 5. **Training**: Fine-tunes the model on the task
 6. **Evaluation**: Evaluates performance using official GLUE metrics
 7. **Analysis**: Reports vocabulary reduction and parameter savings
+8. **Summary**: Generates a comprehensive summary of results across tasks (when using example scripts)
 
 ## Troubleshooting
 
