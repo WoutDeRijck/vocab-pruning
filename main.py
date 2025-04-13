@@ -13,6 +13,8 @@ experiments on GLUE benchmark tasks with various techniques:
 5. Random selection pruning: Randomly select tokens to keep or remove (baseline)
 6. Word importance pruning without OOV: Use TF-IDF with OOV tokens mapped to UNK
 7. Attention-based pruning: Use attention patterns from a fine-tuned model to determine token importance
+8. Train-only pruning: Only keep tokens that appear in the training set (baseline)
+9. No-pruning baseline: Keep the full original vocabulary without any changes (baseline)
 """
 
 import os
@@ -39,6 +41,8 @@ from pruning.importance_oov import setup_importance_oov_model
 from pruning.importance import setup_importance_based_model
 from pruning.random import setup_random_based_model
 from pruning.attention import setup_attention_based_model
+from pruning.train_only import setup_train_only_model
+from pruning.no_pruning import setup_no_pruning_model
 from pruning.base import task_to_keys
 from utils import glue_tasks
 
@@ -87,7 +91,7 @@ def parse_args():
         "--pruning_method", 
         type=str, 
         default="clustering",
-        choices=["clustering", "frequency", "frequency_oov", "importance_oov", "importance", "random", "attention"],
+        choices=["clustering", "frequency", "frequency_oov", "importance_oov", "importance", "random", "attention", "train_only", "no_pruning"],
         help="Method to use for vocabulary pruning"
     )
     
@@ -438,6 +442,16 @@ def run_cross_validation_pipeline(args, tokenizer):
                     attention_model=args.attention_model,
                     prune_percent=args.prune_percent
                 )
+            elif args.pruning_method == "train_only":
+                model, token_map, oov_lookup = setup_train_only_model(
+                    args.task, 
+                    args.model_name
+                )
+            elif args.pruning_method == "no_pruning":
+                model, token_map, oov_lookup = setup_no_pruning_model(
+                    args.task, 
+                    args.model_name
+                )
             
             # Apply token remapping to create datasets with reduced vocabulary
             logger.info("Applying vocabulary mapping to datasets")
@@ -665,6 +679,16 @@ def run_standard_pipeline(args, tokenizer):
             attention_model=args.attention_model,
             prune_percent=args.prune_percent
         )
+    elif args.pruning_method == "train_only":
+        model, token_map, oov_lookup = setup_train_only_model(
+            args.task, 
+            args.model_name
+        )
+    elif args.pruning_method == "no_pruning":
+        model, token_map, oov_lookup = setup_no_pruning_model(
+            args.task, 
+            args.model_name
+        )
     
     # Always use custom splits now
     logger.info("Creating custom train/validation/test splits")
@@ -887,6 +911,10 @@ def run_pipeline(args):
     elif args.pruning_method == "attention":
         attention_model_suffix = "_finetuned" if args.attention_model else ""
         log_filename = f"{args.output_dir}/{args.task}_attention_prune{args.prune_percent}{attention_model_suffix}.log"
+    elif args.pruning_method == "train_only":
+        log_filename = f"{args.output_dir}/{args.task}_train_only.log"
+    elif args.pruning_method == "no_pruning":
+        log_filename = f"{args.output_dir}/{args.task}_no_pruning.log"
     
     # Add CV info to log filename if using cross-validation
     if args.cross_validation:

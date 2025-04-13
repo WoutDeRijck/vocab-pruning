@@ -12,6 +12,9 @@ import argparse
 import logging
 import subprocess
 import os
+import re
+import pandas as pd
+from datetime import datetime
 
 # Configure logging
 logging.basicConfig(
@@ -167,6 +170,54 @@ def parse_args():
     
     return parser.parse_args()
 
+def parse_log_file(log_file):
+    """
+    Parse a log file to extract key metrics.
+    
+    Args:
+        log_file: Path to the log file
+        
+    Returns:
+        Dictionary with extracted metrics
+    """
+    metrics = {}
+    
+    try:
+        with open(log_file, 'r') as f:
+            log_content = f.read()
+            
+            # Extract validation metrics
+            val_metrics = re.findall(r'eval_(\w+): ([0-9.]+)', log_content)
+            for metric_name, value in val_metrics:
+                metrics[f"val_{metric_name}"] = float(value)
+            
+            # Extract test metrics
+            test_section = re.search(r'=== Test Set Evaluation Results ===\n(.*?)(?=\n\n|\Z)', 
+                                    log_content, re.DOTALL)
+            if test_section:
+                test_metrics = re.findall(r'(\w+): ([0-9.]+)', test_section.group(1))
+                for metric_name, value in test_metrics:
+                    metrics[f"test_{metric_name}"] = float(value)
+            
+            # Extract parameter reduction statistics
+            param_section = re.search(r'=== Parameter Reduction Statistics ===\n(.*?)(?=\n\n|\Z)', 
+                                    log_content, re.DOTALL)
+            if param_section:
+                param_metrics = re.findall(r'(\w+) parameter reduction: ([0-9.]+)%', 
+                                        param_section.group(1))
+                for param_type, value in param_metrics:
+                    metrics[f"{param_type.lower()}_param_reduction"] = float(value)
+            
+            # Extract vocabulary reduction
+            vocab_match = re.search(r'Vocabulary reduction: ([0-9.]+)%', log_content)
+            if vocab_match:
+                metrics["vocab_reduction"] = float(vocab_match.group(1))
+            
+    except Exception as e:
+        logger.error(f"Error parsing log file {log_file}: {e}")
+    
+    return metrics
+
 def main():
     """Run frequency-based pruning on specified GLUE tasks."""
     args = parse_args()
@@ -176,6 +227,9 @@ def main():
     
     # Log arguments
     logger.info(f"Running with arguments: {args}")
+    
+    # Dictionary to store results for each task
+    all_results = {}
     
     # Run each task
     for task in args.tasks:
@@ -228,9 +282,69 @@ def main():
         try:
             subprocess.run(cmd, check=True)
             logger.info(f"Successfully completed frequency-based pruning for task: {task}")
+            
+            # Find the log file for this task
+            log_file = os.path.join(
+                task_output_dir, 
+                f"{task}_frequency_prune{task_params['prune_percent']}.log"
+            )
+            if os.path.exists(log_file):
+                # Parse results from the log file
+                task_results = parse_log_file(log_file)
+                all_results[task] = task_results
+            else:
+                logger.warning(f"Log file not found for task {task}")
+                
         except subprocess.CalledProcessError as e:
             logger.error(f"Error running frequency-based pruning for task {task}: {e}")
             continue
+    
+    # Create summary of results
+    if all_results:
+        logger.info("\n" + "=" * 80)
+        logger.info("SUMMARY OF RESULTS")
+        logger.info("=" * 80)
+        
+        # Create DataFrame for test results
+        test_metrics = {}
+        for task, metrics in all_results.items():
+            test_metrics[task] = {k: v for k, v in metrics.items() if k.startswith("test_")}
+        
+        test_df = pd.DataFrame.from_dict(test_metrics, orient='index')
+        if not test_df.empty:
+            # Clean up column names for display
+            test_df.columns = [col.replace("test_", "") for col in test_df.columns]
+            
+            logger.info("\nTest Results:")
+            logger.info("\n" + test_df.to_string())
+        
+        # Create DataFrame for parameter reduction statistics
+        param_metrics = {}
+        for task, metrics in all_results.items():
+            param_metrics[task] = {
+                "vocab_reduction": metrics.get("vocab_reduction", 0),
+                "total_param_reduction": metrics.get("total_param_reduction", 0),
+                "embedding_param_reduction": metrics.get("embedding_param_reduction", 0),
+                "model_only_param_reduction": metrics.get("model_only_param_reduction", 0)
+            }
+        
+        param_df = pd.DataFrame.from_dict(param_metrics, orient='index')
+        if not param_df.empty and param_df.sum().sum() > 0:  # Check if we have any non-zero reductions
+            logger.info("\nParameter Reduction Statistics:")
+            logger.info("\n" + param_df.to_string())
+        
+        # Save summary to file
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        summary_file = os.path.join(args.output_dir, f"summary_results_{timestamp}.csv")
+        
+        # Combine all metrics
+        all_metrics = {}
+        for task in all_results:
+            all_metrics[task] = all_results[task]
+        
+        summary_df = pd.DataFrame.from_dict(all_metrics, orient='index')
+        summary_df.to_csv(summary_file)
+        logger.info(f"\nSaved detailed summary to {summary_file}")
     
     logger.info("\nAll tasks completed!")
 

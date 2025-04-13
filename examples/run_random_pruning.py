@@ -2,27 +2,20 @@
 # coding: utf-8
 
 """
-Random-based Vocabulary Pruning Example Script
+Random Vocabulary Pruning Script
 
-This script demonstrates how to use the random-based vocabulary pruning technique
-on GLUE benchmark tasks. This serves as a baseline approach where tokens are pruned randomly
-without consideration for importance.
-
-Example usage:
-    python run_random_pruning.py --task mrpc --prune_percent 20
+This script runs random vocabulary pruning on all GLUE benchmark tasks.
+Each task has customized hyperparameters for optimal performance.
+This serves as a baseline for comparison with other pruning methods.
 """
 
-import os
-import sys
 import argparse
 import logging
+import subprocess
+import os
+import re
+import pandas as pd
 from datetime import datetime
-
-# Add parent directory to path to import modules
-sys.path.append('..')
-
-from main import run_pipeline
-from utils import set_seed
 
 # Configure logging
 logging.basicConfig(
@@ -31,38 +24,93 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Define all GLUE tasks
-GLUE_TASKS = ["cola", "mnli", "mrpc", "qnli", "qqp", "rte", "sst2", "stsb", "wnli"]
+# Get the absolute path to the project root directory
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+# Get the absolute path to main.py
+MAIN_SCRIPT_PATH = os.path.join(PROJECT_ROOT, "main.py")
 
 BATCH_SIZE = 64
 PRUNE_PERCENT = 20
 
-# Default settings for each task (customize as needed)
-TASK_DEFAULTS = {
-    "cola": {"batch_size": BATCH_SIZE, "learning_rate": 8e-5, "epochs": 5, "prune_percent": PRUNE_PERCENT},
-    "mnli": {"batch_size": BATCH_SIZE, "learning_rate": 5e-5, "epochs": 1, "prune_percent": PRUNE_PERCENT},
-    "mrpc": {"batch_size": BATCH_SIZE, "learning_rate": 5e-5, "epochs": 10, "prune_percent": PRUNE_PERCENT},
-    "qnli": {"batch_size": BATCH_SIZE, "learning_rate": 8e-5, "epochs": 2, "prune_percent": PRUNE_PERCENT},
-    "qqp": {"batch_size": BATCH_SIZE, "learning_rate": 5e-5, "epochs": 10, "prune_percent": PRUNE_PERCENT},
-    "rte": {"batch_size": BATCH_SIZE, "learning_rate": 5e-5, "epochs": 3, "prune_percent": PRUNE_PERCENT},
-    "sst2": {"batch_size": BATCH_SIZE, "learning_rate": 8e-5, "epochs": 2, "prune_percent": PRUNE_PERCENT},
-    "stsb": {"batch_size": BATCH_SIZE, "learning_rate": 8e-5, "epochs": 10, "prune_percent": PRUNE_PERCENT},
-    "wnli": {"batch_size": BATCH_SIZE, "learning_rate": 5e-5, "epochs": 3, "prune_percent": PRUNE_PERCENT}
+# Dictionary of task-specific parameters
+TASK_PARAMS = {
+    "cola": {
+        "epochs": 5,
+        "learning_rate": 8e-5,
+        "batch_size": BATCH_SIZE,
+        "weight_decay": 1e-6,
+        "prune_percent": PRUNE_PERCENT,
+    },
+    "mnli": {
+        "epochs": 1,
+        "learning_rate": 5e-5,
+        "batch_size": BATCH_SIZE,
+        "weight_decay": 5e-6,
+        "prune_percent": PRUNE_PERCENT,
+    },
+    "mrpc": {
+        "epochs": 10,
+        "learning_rate": 5e-5,
+        "batch_size": BATCH_SIZE,
+        "weight_decay": 5e-6,
+        "prune_percent": PRUNE_PERCENT,
+    },
+    "qnli": {
+        "epochs": 2,
+        "learning_rate": 8e-5,
+        "batch_size": BATCH_SIZE,
+        "weight_decay": 5e-6,
+        "prune_percent": PRUNE_PERCENT,
+    },
+    "qqp": {
+        "epochs": 10,
+        "learning_rate": 5e-5,
+        "batch_size": BATCH_SIZE,
+        "weight_decay": 5e-6,
+        "prune_percent": PRUNE_PERCENT,
+    },
+    "rte": {
+        "epochs": 3,
+        "learning_rate": 5e-5,
+        "batch_size": BATCH_SIZE,
+        "weight_decay": 1e-5,
+        "prune_percent": PRUNE_PERCENT,
+    },
+    "sst2": {
+        "epochs": 2,
+        "learning_rate": 8e-5,
+        "batch_size": BATCH_SIZE,
+        "weight_decay": 1e-5,
+        "prune_percent": PRUNE_PERCENT,
+    },
+    "stsb": {
+        "epochs": 10,
+        "learning_rate": 8e-5,
+        "batch_size": BATCH_SIZE,
+        "weight_decay": 5e-6,
+        "prune_percent": PRUNE_PERCENT,
+    },
+    "wnli": {
+        "epochs": 3,
+        "learning_rate": 5e-5,
+        "batch_size": BATCH_SIZE,
+        "weight_decay": 1e-5,
+        "prune_percent": PRUNE_PERCENT,
+    },
 }
 
 def parse_args():
-    """Parse command line arguments for Random pruning."""
+    """Parse command line arguments."""
     parser = argparse.ArgumentParser(
-        description="Train and evaluate models with Random-based vocabulary pruning"
+        description="Run random vocabulary pruning on GLUE tasks"
     )
     
-    # Task and model arguments
     parser.add_argument(
-        "--task", 
+        "--tasks", 
         type=str, 
-        default="mrpc", 
-        choices=GLUE_TASKS,
-        help="GLUE task name"
+        nargs="+",
+        default=list(TASK_PARAMS.keys()),
+        help="GLUE tasks to run (default: all)"
     )
     
     parser.add_argument(
@@ -72,80 +120,48 @@ def parse_args():
         help="Pretrained model name or path"
     )
     
-    # Pruning arguments
+    parser.add_argument(
+        "--output_dir", 
+        type=str, 
+        default="./random_pruning_output",
+        help="Output directory for model checkpoints and logs"
+    )
+    
     parser.add_argument(
         "--prune_percent", 
         type=float, 
         default=None,
-        help="Percentage of vocabulary to prune (overrides task defaults)"
+        help="Override the default prune percentage for all tasks"
     )
     
-    # Training arguments
     parser.add_argument(
         "--epochs", 
         type=int, 
         default=None,
-        help="Number of training epochs (overrides task defaults)"
+        help="Override the default number of epochs for all tasks"
     )
     
     parser.add_argument(
         "--learning_rate", 
         type=float, 
         default=None,
-        help="Learning rate (overrides task defaults)"
-    )
-    
-    parser.add_argument(
-        "--weight_decay", 
-        type=float, 
-        default=8e-6,
-        help="Weight decay"
+        help="Override the default learning rate for all tasks"
     )
     
     parser.add_argument(
         "--batch_size", 
         type=int, 
         default=None,
-        help="Training batch size (overrides task defaults)"
-    )
-    
-    # Cross-validation arguments
-    parser.add_argument(
-        "--cross_validation", 
-        action="store_true",
-        help="Use cross-validation"
+        help="Override the default batch size for all tasks"
     )
     
     parser.add_argument(
-        "--n_folds", 
-        type=int, 
-        default=5,
-        help="Number of folds for cross-validation"
-    )
-    
-    # Data split arguments
-    parser.add_argument(
-        "--train_ratio", 
+        "--weight_decay", 
         type=float, 
-        default=0.8,
-        help="Ratio of data to use for training"
+        default=None,
+        help="Override the default weight decay for all tasks"
     )
     
-    parser.add_argument(
-        "--validation_ratio", 
-        type=float, 
-        default=0.1,
-        help="Ratio of data to use for validation"
-    )
-    
-    parser.add_argument(
-        "--test_ratio", 
-        type=float, 
-        default=0.1,
-        help="Ratio of data to use for testing"
-    )
-    
-    # Misc arguments
     parser.add_argument(
         "--seed", 
         type=int, 
@@ -155,57 +171,183 @@ def parse_args():
     
     return parser.parse_args()
 
+def parse_log_file(log_file):
+    """
+    Parse a log file to extract key metrics.
+    
+    Args:
+        log_file: Path to the log file
+        
+    Returns:
+        Dictionary with extracted metrics
+    """
+    metrics = {}
+    
+    try:
+        with open(log_file, 'r') as f:
+            log_content = f.read()
+            
+            # Extract validation metrics
+            val_metrics = re.findall(r'eval_(\w+): ([0-9.]+)', log_content)
+            for metric_name, value in val_metrics:
+                metrics[f"val_{metric_name}"] = float(value)
+            
+            # Extract test metrics
+            test_section = re.search(r'=== Test Set Evaluation Results ===\n(.*?)(?=\n\n|\Z)', 
+                                    log_content, re.DOTALL)
+            if test_section:
+                test_metrics = re.findall(r'(\w+): ([0-9.]+)', test_section.group(1))
+                for metric_name, value in test_metrics:
+                    metrics[f"test_{metric_name}"] = float(value)
+            
+            # Extract parameter reduction statistics
+            param_section = re.search(r'=== Parameter Reduction Statistics ===\n(.*?)(?=\n\n|\Z)', 
+                                    log_content, re.DOTALL)
+            if param_section:
+                param_metrics = re.findall(r'(\w+) parameter reduction: ([0-9.]+)%', 
+                                        param_section.group(1))
+                for param_type, value in param_metrics:
+                    metrics[f"{param_type.lower()}_param_reduction"] = float(value)
+            
+            # Extract vocabulary reduction
+            vocab_match = re.search(r'Vocabulary reduction: ([0-9.]+)%', log_content)
+            if vocab_match:
+                metrics["vocab_reduction"] = float(vocab_match.group(1))
+            
+    except Exception as e:
+        logger.error(f"Error parsing log file {log_file}: {e}")
+    
+    return metrics
+
 def main():
-    """Main function to run Random-based pruning."""
+    """Run random pruning on specified GLUE tasks."""
     args = parse_args()
     
-    # Set random seed
-    set_seed(args.seed)
+    # Create output directory
+    os.makedirs(args.output_dir, exist_ok=True)
     
-    # Apply task-specific defaults unless overridden
-    task_name = args.task
-    batch_size = args.batch_size if args.batch_size is not None else TASK_DEFAULTS[task_name]["batch_size"]
-    learning_rate = args.learning_rate if args.learning_rate is not None else TASK_DEFAULTS[task_name]["learning_rate"]
-    epochs = args.epochs if args.epochs is not None else TASK_DEFAULTS[task_name]["epochs"]
-    prune_percent = args.prune_percent if args.prune_percent is not None else TASK_DEFAULTS[task_name]["prune_percent"]
+    # Log arguments
+    logger.info(f"Running with arguments: {args}")
     
-    # Create timestamped output directory
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    output_dir = f"../results/{task_name}_random_prune{prune_percent}_{timestamp}"
-    os.makedirs(output_dir, exist_ok=True)
+    # Dictionary to store results for each task
+    all_results = {}
     
-    # Set up configuration for the run
-    config = argparse.Namespace(
-        task=task_name,
-        model_name=args.model_name,
-        pruning_method="random",  # Specify pruning method as random
-        prune_percent=prune_percent,
-        epochs=epochs,
-        learning_rate=learning_rate,
-        weight_decay=args.weight_decay,
-        batch_size=batch_size,
-        cross_validation=args.cross_validation,
-        n_folds=args.n_folds,
-        train_ratio=args.train_ratio,
-        validation_ratio=args.validation_ratio,
-        test_ratio=args.test_ratio,
-        output_dir=output_dir,
-        seed=args.seed
-    )
+    # Run each task
+    for task in args.tasks:
+        if task not in TASK_PARAMS:
+            logger.warning(f"Task {task} not found in task parameters, skipping.")
+            continue
+        
+        # Get task parameters
+        task_params = TASK_PARAMS[task].copy()
+        
+        # Override task parameters if specified
+        if args.prune_percent is not None:
+            task_params["prune_percent"] = args.prune_percent
+        if args.epochs is not None:
+            task_params["epochs"] = args.epochs
+        if args.learning_rate is not None:
+            task_params["learning_rate"] = args.learning_rate
+        if args.batch_size is not None:
+            task_params["batch_size"] = args.batch_size
+        if args.weight_decay is not None:
+            task_params["weight_decay"] = args.weight_decay
+        
+        # Create task-specific output directory
+        task_output_dir = os.path.join(args.output_dir, task)
+        os.makedirs(task_output_dir, exist_ok=True)
+        
+        # Log task parameters
+        logger.info(f"\n{'=' * 50}")
+        logger.info(f"Running random pruning for task: {task}")
+        logger.info(f"Parameters: {task_params}")
+        logger.info(f"{'=' * 50}")
+        
+        # Build command for the main script
+        cmd = [
+            "python", MAIN_SCRIPT_PATH,
+            "--task", task,
+            "--model_name", args.model_name,
+            "--pruning_method", "random",
+            "--prune_percent", str(task_params["prune_percent"]),
+            "--epochs", str(task_params["epochs"]),
+            "--learning_rate", str(task_params["learning_rate"]),
+            "--batch_size", str(task_params["batch_size"]),
+            "--weight_decay", str(task_params["weight_decay"]),
+            "--output_dir", task_output_dir,
+            "--seed", str(args.seed),
+        ]
+        
+        # Run the command
+        logger.info(f"Running command: {' '.join(cmd)}")
+        try:
+            subprocess.run(cmd, check=True)
+            logger.info(f"Successfully completed random pruning for task: {task}")
+            
+            # Find the log file for this task
+            log_file = os.path.join(
+                task_output_dir, 
+                f"{task}_random_prune{task_params['prune_percent']}.log"
+            )
+            if os.path.exists(log_file):
+                # Parse results from the log file
+                task_results = parse_log_file(log_file)
+                all_results[task] = task_results
+            else:
+                logger.warning(f"Log file not found for task {task}")
+                
+        except subprocess.CalledProcessError as e:
+            logger.error(f"Error running random pruning for task {task}: {e}")
+            continue
     
-    # Log configuration
-    logger.info(f"Running Random-based pruning on {task_name} with {prune_percent}% pruning")
-    logger.info(f"Output directory: {output_dir}")
+    # Create summary of results
+    if all_results:
+        logger.info("\n" + "=" * 80)
+        logger.info("SUMMARY OF RESULTS")
+        logger.info("=" * 80)
+        
+        # Create DataFrame for test results
+        test_metrics = {}
+        for task, metrics in all_results.items():
+            test_metrics[task] = {k: v for k, v in metrics.items() if k.startswith("test_")}
+        
+        test_df = pd.DataFrame.from_dict(test_metrics, orient='index')
+        if not test_df.empty:
+            # Clean up column names for display
+            test_df.columns = [col.replace("test_", "") for col in test_df.columns]
+            
+            logger.info("\nTest Results:")
+            logger.info("\n" + test_df.to_string())
+        
+        # Create DataFrame for parameter reduction statistics
+        param_metrics = {}
+        for task, metrics in all_results.items():
+            param_metrics[task] = {
+                "vocab_reduction": metrics.get("vocab_reduction", 0),
+                "total_param_reduction": metrics.get("total_param_reduction", 0),
+                "embedding_param_reduction": metrics.get("embedding_param_reduction", 0),
+                "model_only_param_reduction": metrics.get("model_only_param_reduction", 0)
+            }
+        
+        param_df = pd.DataFrame.from_dict(param_metrics, orient='index')
+        if not param_df.empty and param_df.sum().sum() > 0:  # Check if we have any non-zero reductions
+            logger.info("\nParameter Reduction Statistics:")
+            logger.info("\n" + param_df.to_string())
+        
+        # Save summary to file
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        summary_file = os.path.join(args.output_dir, f"summary_results_{timestamp}.csv")
+        
+        # Combine all metrics
+        all_metrics = {}
+        for task in all_results:
+            all_metrics[task] = all_results[task]
+        
+        summary_df = pd.DataFrame.from_dict(all_metrics, orient='index')
+        summary_df.to_csv(summary_file)
+        logger.info(f"\nSaved detailed summary to {summary_file}")
     
-    for key, value in vars(config).items():
-        logger.info(f"{key}: {value}")
-    
-    # Run the pruning pipeline
-    results_df, model = run_pipeline(config)
-    
-    logger.info(f"Random-based pruning completed successfully")
-    
-    return results_df, model
+    logger.info("\nAll tasks completed!")
 
 if __name__ == "__main__":
     main() 

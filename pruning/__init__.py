@@ -9,6 +9,8 @@ This package contains implementations of different vocabulary pruning techniques
 - Word importance OOV pruning
 - Attention-based pruning
 - Random pruning
+- Train-only pruning
+- No-pruning baseline
 """
 
 from .base import *
@@ -18,4 +20,6 @@ from .frequency_oov import *
 from .importance import *
 from .importance_oov import *
 from .attention import *
-from .random import * 
+from .random import *
+from .train_only import *
+from .no_pruning import * 
