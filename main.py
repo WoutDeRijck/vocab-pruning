@@ -265,7 +265,7 @@ def create_results_dataframe(metrics_callback):
         logger.warning("Continuing without saving training history")
         return pd.DataFrame()
 
-def evaluate_test_set(model, test_dataset, task_name, data_collator, batch_size):
+def evaluate_test_set(model, test_dataset, task_name, data_collator, batch_size, pruning_method="clustering", tokenizer=None, trainer=None):
     """
     Evaluate model on test set and return metrics.
     
@@ -275,39 +275,88 @@ def evaluate_test_set(model, test_dataset, task_name, data_collator, batch_size)
         task_name: Name of the GLUE task
         data_collator: Data collator to use
         batch_size: Batch size for evaluation
+        pruning_method: Pruning method used
+        tokenizer: Tokenizer (for no_pruning case)
+        trainer: The trainer object (if available) for consistent prediction
         
     Returns:
         Dictionary of metrics
     """
     logger.info("Generating predictions on test set")
-    with torch.no_grad():
-        device = next(model.parameters()).device
-        predictions = []
-        
-        # Process in batches
-        dataloader = torch.utils.data.DataLoader(
-            test_dataset, batch_size=batch_size,
-            collate_fn=data_collator
-        )
-        
-        for batch in tqdm(dataloader, desc="Predicting"):
-            # Filter out non-tensor values and labels
-            batch = {k: v.to(device) for k, v in batch.items() 
-                    if k != 'labels' and k != 'prediction_only' and hasattr(v, 'to')}
-            with torch.no_grad():
-                outputs = model(**batch)
-            logits = outputs.logits
-            predictions.append(logits.cpu().numpy())
-        
-        # Concatenate predictions
-        all_predictions = np.vstack(predictions)
+    
+    # If trainer is provided, use it for predictions to ensure consistent processing
+    if trainer is not None:
+        logger.info("Using Trainer.predict() for consistent processing")
+        prediction_output = trainer.predict(test_dataset)
+        predictions = prediction_output.predictions
         
         # For classification tasks, get the class with highest probability
-        if len(all_predictions.shape) > 1 and all_predictions.shape[1] > 1:
-            predictions = np.argmax(all_predictions, axis=1)
+        if len(predictions.shape) > 1 and predictions.shape[1] > 1:
+            predictions = np.argmax(predictions, axis=1)
         else:
             # For regression tasks
-            predictions = all_predictions.squeeze()
+            predictions = predictions.squeeze()
+    else:
+        # Fall back to manual processing if no trainer is provided
+        with torch.no_grad():
+            device = next(model.parameters()).device
+            predictions = []
+            
+            # Special handling for no_pruning with DataCollatorWithPadding
+            if pruning_method == "no_pruning" and tokenizer is not None:
+                logger.info("Using custom dataloader for no_pruning with standard tokenizer")
+                try:
+                    # Process one example at a time - safest approach
+                    logger.info("Processing examples individually")
+                    for i in tqdm(range(len(test_dataset)), desc="Predicting"):
+                        example = test_dataset[i]
+                        
+                        # Extract input_ids and attention_mask, ensuring they're tensors
+                        if isinstance(example['input_ids'], torch.Tensor):
+                            input_ids = example['input_ids'].unsqueeze(0).to(device)  # Add batch dimension
+                        else:
+                            # Convert to tensor if it's a list or other type
+                            input_ids = torch.tensor([example['input_ids']], dtype=torch.long).to(device)
+                        
+                        if isinstance(example['attention_mask'], torch.Tensor):
+                            attention_mask = example['attention_mask'].unsqueeze(0).to(device)
+                        else:
+                            attention_mask = torch.tensor([example['attention_mask']], dtype=torch.long).to(device)
+                        
+                        # Forward pass
+                        outputs = model(input_ids=input_ids, attention_mask=attention_mask)
+                        logits = outputs.logits
+                        predictions.append(logits.cpu().numpy())
+                except Exception as e:
+                    logger.error(f"Error processing examples: {e}")
+                    logger.error(traceback.format_exc())
+                    return {}
+            else:
+                # Process in batches using the provided collator
+                dataloader = torch.utils.data.DataLoader(
+                    test_dataset, batch_size=batch_size,
+                    collate_fn=data_collator
+                )
+                
+                for batch in tqdm(dataloader, desc="Predicting"):
+                    # Filter out non-tensor values and labels
+                    batch_inputs = {k: v.to(device) for k, v in batch.items() 
+                               if k != 'labels' and k != 'prediction_only' and hasattr(v, 'to')}
+                    
+                    with torch.no_grad():
+                        outputs = model(**batch_inputs)
+                    logits = outputs.logits
+                    predictions.append(logits.cpu().numpy())
+            
+            # Concatenate predictions
+            all_predictions = np.vstack(predictions)
+            
+            # For classification tasks, get the class with highest probability
+            if len(all_predictions.shape) > 1 and all_predictions.shape[1] > 1:
+                predictions = np.argmax(all_predictions, axis=1)
+            else:
+                # For regression tasks
+                predictions = all_predictions.squeeze()
     
     # Save predictions to file
     output_test_file = f"{model.config._name_or_path.replace('/', '_')}_{task_name}_predictions.txt"
@@ -508,8 +557,8 @@ def run_cross_validation_pipeline(args, tokenizer):
             if args.pruning_method == "no_pruning":
                 trainer, metrics_callback = setup_training(
                     model, 
-                    train_dataset, 
-                    eval_dataset, 
+                    train_dataset,  # Use original dataset
+                    eval_dataset,   # Use original dataset
                     args.task, 
                     fold_args,
                     tokenizer=tokenizer
@@ -545,13 +594,27 @@ def run_cross_validation_pipeline(args, tokenizer):
                 
                 # Generate predictions on test set
                 logger.info(f"Generating test predictions for fold {fold_idx+1}")
-                test_metrics = evaluate_test_set(
-                    trainer.model, 
-                    remapped_test, 
-                    args.task, 
-                    trainer.data_collator, 
-                    args.batch_size
-                )
+                if args.pruning_method == "no_pruning":
+                    test_metrics = evaluate_test_set(
+                        trainer.model, 
+                        remapped_test, 
+                        args.task, 
+                        trainer.data_collator, 
+                        args.batch_size,
+                        pruning_method=args.pruning_method,
+                        tokenizer=tokenizer,
+                        trainer=trainer  # Pass the trainer for consistent processing
+                    )
+                else:
+                    test_metrics = evaluate_test_set(
+                        trainer.model, 
+                        remapped_test, 
+                        args.task, 
+                        trainer.data_collator, 
+                        args.batch_size,
+                        pruning_method=args.pruning_method,
+                        trainer=trainer  # Pass the trainer for consistent processing
+                    )
                 
                 # Add fold info to metrics
                 test_metrics['fold'] = fold_idx+1
@@ -705,35 +768,31 @@ def run_standard_pipeline(args, tokenizer):
             args.model_name
         )
     
-    # Special handling for no_pruning: use standard dataset preparation
-    if args.pruning_method == "no_pruning":
-        logger.info("Using standard dataset preparation for no_pruning baseline")
-        tokenizer = AutoTokenizer.from_pretrained(args.model_name)
-        from pruning.no_pruning import prepare_standard_datasets
-        train_dataset, eval_dataset, test_dataset = prepare_standard_datasets(
+    # Always use custom splits for all methods including no_pruning
+    logger.info("Creating custom train/validation/test splits")
+    try:
+        # Import custom splitting utilities
+        from split_utils import prepare_custom_split_datasets
+        
+        # Create custom splits
+        train_dataset, eval_dataset, test_dataset = prepare_custom_split_datasets(
             task_name=args.task,
             tokenizer=tokenizer,
-            max_length=128
+            train_ratio=args.train_ratio,
+            validation_ratio=args.validation_ratio,
+            test_ratio=args.test_ratio,
+            max_length=128,  # Same as in original prepare_datasets_with_mapping
+            random_seed=args.seed
         )
-        logger.info(f"Created standard datasets with sizes: train={len(train_dataset)}, validation={len(eval_dataset)}")
-    else:
-        # Always use custom splits for pruning methods
-        logger.info("Creating custom train/validation/test splits")
-        try:
-            # Import custom splitting utilities
-            from split_utils import prepare_custom_split_datasets
-            
-            # Create custom splits
-            train_dataset, eval_dataset, test_dataset = prepare_custom_split_datasets(
-                task_name=args.task,
-                tokenizer=tokenizer,
-                train_ratio=args.train_ratio,
-                validation_ratio=args.validation_ratio,
-                test_ratio=args.test_ratio,
-                max_length=128,  # Same as in original prepare_datasets_with_mapping
-                random_seed=args.seed
-            )
-            
+        
+        # For no_pruning, we'll use the datasets as-is (no remapping needed)
+        if args.pruning_method == "no_pruning":
+            logger.info("Using custom splits without token remapping for no_pruning baseline")
+            # Just make sure the label column is named correctly
+            for dataset in [train_dataset, eval_dataset, test_dataset]:
+                if dataset is not None and 'label' in dataset.column_names and 'labels' not in dataset.column_names:
+                    dataset = dataset.rename_column('label', 'labels')
+        else:
             # Apply token remapping to create datasets with reduced vocabulary
             logger.info("Applying vocabulary mapping to custom splits")
             
@@ -772,21 +831,21 @@ def run_standard_pipeline(args, tokenizer):
                 
                 return remapped_dataset
             
-            # Apply remapping to all datasets
+            # Apply remapping to all datasets for pruning methods
             train_dataset = remap_tokens(train_dataset)
             eval_dataset = remap_tokens(eval_dataset)
             test_dataset = remap_tokens(test_dataset)
-            
-            logger.info(f"Created custom splits with sizes: train={len(train_dataset)}, validation={len(eval_dataset)}, test={len(test_dataset)}")
-            
-        except ImportError as e:
-            logger.error(f"Failed to import split_utils module: {e}")
-            logger.error("Custom splits is now required. Please make sure split_utils.py is in your path.")
-            raise ImportError("Could not import split_utils module which is required for custom splits")
+        
+        logger.info(f"Created custom splits with sizes: train={len(train_dataset)}, validation={len(eval_dataset)}, test={len(test_dataset)}")
+        
+    except ImportError as e:
+        logger.error(f"Failed to import split_utils module: {e}")
+        logger.error("Custom splits is now required. Please make sure split_utils.py is in your path.")
+        raise ImportError("Could not import split_utils module which is required for custom splits")
     
     # Setup trainer
     if args.pruning_method == "no_pruning":
-        # For no_pruning, skip token remapping and use the standard tokenizer directly
+        # For no_pruning, use the standard tokenizer with the Trainer
         trainer, metrics_callback = setup_training(
             model, 
             train_dataset, 
@@ -796,7 +855,7 @@ def run_standard_pipeline(args, tokenizer):
             tokenizer=tokenizer  # Pass tokenizer for standard DataCollatorWithPadding
         )
     else:
-        # For pruning methods, use the standard setup with custom collators
+        # For pruning methods, use the custom collator
         trainer, metrics_callback = setup_training(
             model, 
             train_dataset, 
@@ -884,12 +943,23 @@ def run_standard_pipeline(args, tokenizer):
         logger.info("\n=== Test Set Prediction Generation ===")
         try:
             # Generate test predictions using the function from training.py
-            generate_test_predictions(
-                trainer.model,
-                test_dataset, 
-                trainer.data_collator,
-                args
-            )
+            if args.pruning_method == "no_pruning":
+                generate_test_predictions(
+                    trainer.model,
+                    test_dataset, 
+                    trainer.data_collator,
+                    args,
+                    tokenizer=tokenizer,  # Pass tokenizer for no_pruning
+                    trainer=trainer       # Pass the trainer for consistent processing
+                )
+            else:
+                generate_test_predictions(
+                    trainer.model,
+                    test_dataset, 
+                    trainer.data_collator,
+                    args,
+                    trainer=trainer       # Pass the trainer for consistent processing
+                )
             
             # Test metrics can now be calculated directly with a helper function
             test_metrics = evaluate_test_set(
@@ -897,7 +967,10 @@ def run_standard_pipeline(args, tokenizer):
                 test_dataset, 
                 args.task, 
                 trainer.data_collator, 
-                args.batch_size
+                args.batch_size,
+                args.pruning_method,
+                tokenizer,
+                trainer  # Pass the trainer for consistent processing
             )
             
             # Save test metrics to CSV

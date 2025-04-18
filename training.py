@@ -9,6 +9,7 @@ import numpy as np
 import pandas as pd
 from tqdm.auto import tqdm
 from transformers import TrainingArguments, Trainer, DataCollatorWithPadding
+import traceback
 
 from metrics import MetricsCallback, compute_metrics
 from data import ReducedVocabDataCollator, HybridCollator
@@ -147,7 +148,7 @@ def save_training_results(metrics_callback, args, task_name, output_dir):
         logger.warning("Continuing without saving training history")
         return pd.DataFrame()
 
-def generate_test_predictions(model, test_dataset, data_collator, args):
+def generate_test_predictions(model, test_dataset, data_collator, args, tokenizer=None, trainer=None):
     """
     Generate predictions on the test set.
     
@@ -156,6 +157,8 @@ def generate_test_predictions(model, test_dataset, data_collator, args):
         test_dataset: Test dataset
         data_collator: Data collator for batching
         args: Command line arguments
+        tokenizer: Tokenizer for no_pruning case
+        trainer: The trainer object (if available) for consistent processing
         
     Returns:
         predictions: Model predictions on test set
@@ -168,27 +171,12 @@ def generate_test_predictions(model, test_dataset, data_collator, args):
     try:
         # Generate predictions without computing loss
         logger.info("Generating predictions on test set")
-        with torch.no_grad():
-            device = next(model.parameters()).device
-            predictions = []
-            
-            # Process in batches
-            dataloader = torch.utils.data.DataLoader(
-                test_dataset, batch_size=args.batch_size,
-                collate_fn=data_collator
-            )
-            
-            for batch in tqdm(dataloader, desc="Predicting"):
-                # Filter out non-tensor values and labels
-                batch = {k: v.to(device) for k, v in batch.items() 
-                        if k != 'labels' and k != 'prediction_only' and hasattr(v, 'to')}
-                with torch.no_grad():
-                    outputs = model(**batch)
-                logits = outputs.logits
-                predictions.append(logits.cpu().numpy())
-            
-            # Concatenate predictions
-            all_predictions = np.vstack(predictions)
+        
+        # If trainer is provided, use it for predictions to ensure consistent processing
+        if trainer is not None:
+            logger.info("Using Trainer.predict() for consistent processing")
+            prediction_output = trainer.predict(test_dataset)
+            all_predictions = prediction_output.predictions
             
             # For classification tasks, get the class with highest probability
             if len(all_predictions.shape) > 1 and all_predictions.shape[1] > 1:
@@ -196,6 +184,67 @@ def generate_test_predictions(model, test_dataset, data_collator, args):
             else:
                 # For regression tasks
                 predictions = all_predictions.squeeze()
+        else:
+            # Fall back to manual prediction if no trainer is available
+            with torch.no_grad():
+                device = next(model.parameters()).device
+                predictions = []
+                
+                # Special handling for no_pruning with DataCollatorWithPadding
+                if args.pruning_method == "no_pruning" and tokenizer is not None:
+                    logger.info("Using simplified approach for no_pruning")
+                    
+                    try:
+                        # Process one example at a time - safest approach
+                        logger.info("Processing examples individually")
+                        for i in tqdm(range(len(test_dataset)), desc="Predicting"):
+                            example = test_dataset[i]
+                            
+                            # Extract input_ids and attention_mask, ensuring they're tensors
+                            if isinstance(example['input_ids'], torch.Tensor):
+                                input_ids = example['input_ids'].unsqueeze(0).to(device)  # Add batch dimension
+                            else:
+                                # Convert to tensor if it's a list or other type
+                                input_ids = torch.tensor([example['input_ids']], dtype=torch.long).to(device)
+                            
+                            if isinstance(example['attention_mask'], torch.Tensor):
+                                attention_mask = example['attention_mask'].unsqueeze(0).to(device)
+                            else:
+                                attention_mask = torch.tensor([example['attention_mask']], dtype=torch.long).to(device)
+                            
+                            # Forward pass
+                            outputs = model(input_ids=input_ids, attention_mask=attention_mask)
+                            logits = outputs.logits
+                            predictions.append(logits.cpu().numpy())
+                    except Exception as e:
+                        logger.error(f"Error processing examples: {e}")
+                        logger.error(traceback.format_exc())
+                        return None
+                else:
+                    # Process in batches using the provided collator
+                    dataloader = torch.utils.data.DataLoader(
+                        test_dataset, batch_size=args.batch_size,
+                        collate_fn=data_collator
+                    )
+                    
+                    for batch in tqdm(dataloader, desc="Predicting"):
+                        # Filter out non-tensor values and labels
+                        batch = {k: v.to(device) for k, v in batch.items() 
+                                if k != 'labels' and k != 'prediction_only' and hasattr(v, 'to')}
+                        with torch.no_grad():
+                            outputs = model(**batch)
+                        logits = outputs.logits
+                        predictions.append(logits.cpu().numpy())
+                
+                # Concatenate predictions
+                all_predictions = np.vstack(predictions)
+                
+                # For classification tasks, get the class with highest probability
+                if len(all_predictions.shape) > 1 and all_predictions.shape[1] > 1:
+                    predictions = np.argmax(all_predictions, axis=1)
+                else:
+                    # For regression tasks
+                    predictions = all_predictions.squeeze()
         
         # Save predictions for submission
         output_test_file = f"{args.output_dir}/{args.task}_{args.pruning_method}_prune{args.prune_percent}_predictions.txt"
@@ -205,4 +254,5 @@ def generate_test_predictions(model, test_dataset, data_collator, args):
         return predictions
     except Exception as e:
         logger.error(f"Error generating test predictions: {e}")
-        return None 
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        return None
