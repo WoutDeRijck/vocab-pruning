@@ -8,7 +8,7 @@ import torch
 import numpy as np
 import pandas as pd
 from tqdm.auto import tqdm
-from transformers import TrainingArguments, Trainer
+from transformers import TrainingArguments, Trainer, DataCollatorWithPadding
 
 from metrics import MetricsCallback, compute_metrics
 from data import ReducedVocabDataCollator, HybridCollator
@@ -16,7 +16,7 @@ from data import ReducedVocabDataCollator, HybridCollator
 # Configure logging
 logger = logging.getLogger(__name__)
 
-def setup_training(model, train_dataset, eval_dataset, task_name, args):
+def setup_training(model, train_dataset, eval_dataset, task_name, args, tokenizer=None):
     """
     Set up training and evaluation for a reduced vocabulary model.
     
@@ -26,6 +26,7 @@ def setup_training(model, train_dataset, eval_dataset, task_name, args):
         eval_dataset: Evaluation dataset
         task_name: Name of the GLUE task
         args: Command-line arguments with training hyperparameters
+        tokenizer: Tokenizer object (required for no_pruning case)
         
     Returns:
         trainer: Configured Trainer object
@@ -56,7 +57,10 @@ def setup_training(model, train_dataset, eval_dataset, task_name, args):
     )
     
     # Create data collator based on pruning method
-    if args.pruning_method in ["hybrid", "importance"]:
+    if args.pruning_method == "no_pruning" and tokenizer is not None:
+        # For no_pruning, use the standard DataCollatorWithPadding
+        data_collator = DataCollatorWithPadding(tokenizer=tokenizer)
+    elif args.pruning_method in ["hybrid", "importance"]:
         data_collator = HybridCollator(pad_token_id=0, unk_token_id=0)
     else:
         data_collator = ReducedVocabDataCollator(pad_token_id=0)
@@ -65,14 +69,20 @@ def setup_training(model, train_dataset, eval_dataset, task_name, args):
     metrics_callback = MetricsCallback()
     
     # Setup trainer
-    trainer = Trainer(
-        model=model,
-        args=training_args,
-        train_dataset=train_dataset,
-        eval_dataset=eval_dataset,
-        data_collator=data_collator,
-        compute_metrics=partial(compute_metrics, task_name=task_name),
-    )
+    trainer_kwargs = {
+        "model": model,
+        "args": training_args,
+        "train_dataset": train_dataset,
+        "eval_dataset": eval_dataset,
+        "data_collator": data_collator,
+        "compute_metrics": partial(compute_metrics, task_name=task_name),
+    }
+    
+    # Pass tokenizer to trainer for no_pruning case
+    if args.pruning_method == "no_pruning" and tokenizer is not None:
+        trainer_kwargs["tokenizer"] = tokenizer
+    
+    trainer = Trainer(**trainer_kwargs)
     
     # Add callback
     trainer.add_callback(metrics_callback)

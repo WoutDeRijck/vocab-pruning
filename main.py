@@ -505,13 +505,23 @@ def run_cross_validation_pipeline(args, tokenizer):
             fold_args.output_dir = fold_output_dir
             
             # Setup trainer for this fold
-            trainer, metrics_callback = setup_training(
-                model, 
-                remapped_train, 
-                remapped_eval, 
-                args.task, 
-                fold_args
-            )
+            if args.pruning_method == "no_pruning":
+                trainer, metrics_callback = setup_training(
+                    model, 
+                    train_dataset, 
+                    eval_dataset, 
+                    args.task, 
+                    fold_args,
+                    tokenizer=tokenizer
+                )
+            else:
+                trainer, metrics_callback = setup_training(
+                    model, 
+                    remapped_train, 
+                    remapped_eval, 
+                    args.task, 
+                    fold_args
+                )
             
             # Train and evaluate the model for this fold
             logger.info(f"Starting training for fold {fold_idx+1}")
@@ -695,81 +705,105 @@ def run_standard_pipeline(args, tokenizer):
             args.model_name
         )
     
-    # Always use custom splits now
-    logger.info("Creating custom train/validation/test splits")
-    try:
-        # Import custom splitting utilities
-        from split_utils import prepare_custom_split_datasets
-        
-        # Create custom splits
-        train_dataset, eval_dataset, test_dataset = prepare_custom_split_datasets(
+    # Special handling for no_pruning: use standard dataset preparation
+    if args.pruning_method == "no_pruning":
+        logger.info("Using standard dataset preparation for no_pruning baseline")
+        tokenizer = AutoTokenizer.from_pretrained(args.model_name)
+        from pruning.no_pruning import prepare_standard_datasets
+        train_dataset, eval_dataset, test_dataset = prepare_standard_datasets(
             task_name=args.task,
             tokenizer=tokenizer,
-            train_ratio=args.train_ratio,
-            validation_ratio=args.validation_ratio,
-            test_ratio=args.test_ratio,
-            max_length=128,  # Same as in original prepare_datasets_with_mapping
-            random_seed=args.seed
+            max_length=128
         )
-        
-        # Apply token remapping to create datasets with reduced vocabulary
-        logger.info("Applying vocabulary mapping to custom splits")
-        
-        # Function to remap tokens in a dataset
-        def remap_tokens(dataset):
-            # If no token_map (no pruning case), return the dataset unchanged
-            if token_map is None:
-                logger.info("No token mapping applied (using full vocabulary)")
-                return dataset
+        logger.info(f"Created standard datasets with sizes: train={len(train_dataset)}, validation={len(eval_dataset)}")
+    else:
+        # Always use custom splits for pruning methods
+        logger.info("Creating custom train/validation/test splits")
+        try:
+            # Import custom splitting utilities
+            from split_utils import prepare_custom_split_datasets
             
-            # Create a mapping dictionary for quick lookup
-            id_map_dict = token_map.copy()
-            if oov_lookup:
-                id_map_dict.update(oov_lookup)
+            # Create custom splits
+            train_dataset, eval_dataset, test_dataset = prepare_custom_split_datasets(
+                task_name=args.task,
+                tokenizer=tokenizer,
+                train_ratio=args.train_ratio,
+                validation_ratio=args.validation_ratio,
+                test_ratio=args.test_ratio,
+                max_length=128,  # Same as in original prepare_datasets_with_mapping
+                random_seed=args.seed
+            )
             
-            def map_example(example):
-                # Map input_ids using our token mapping
-                new_input_ids = []
-                for token_id in example['input_ids']:
-                    if token_id in id_map_dict:
-                        new_input_ids.append(id_map_dict[token_id])
-                    else:
-                        # Use UNK token (0) for OOV tokens
-                        new_input_ids.append(0)
+            # Apply token remapping to create datasets with reduced vocabulary
+            logger.info("Applying vocabulary mapping to custom splits")
+            
+            # Function to remap tokens in a dataset
+            def remap_tokens(dataset):
+                # If no token_map (no pruning case), return the dataset unchanged
+                if token_map is None:
+                    logger.info("No token mapping applied (using full vocabulary)")
+                    return dataset
                 
-                example['input_ids'] = new_input_ids
-                return example
+                # Create a mapping dictionary for quick lookup
+                id_map_dict = token_map.copy()
+                if oov_lookup:
+                    id_map_dict.update(oov_lookup)
+                
+                def map_example(example):
+                    # Map input_ids using our token mapping
+                    new_input_ids = []
+                    for token_id in example['input_ids']:
+                        if token_id in id_map_dict:
+                            new_input_ids.append(id_map_dict[token_id])
+                        else:
+                            # Use UNK token (0) for OOV tokens
+                            new_input_ids.append(0)
+                    
+                    example['input_ids'] = new_input_ids
+                    return example
+                
+                # Apply mapping to each example
+                remapped_dataset = dataset.map(map_example, desc="Remapping token IDs")
+                
+                # Rename 'label' to 'labels' if it exists (important for data collator compatibility)
+                if 'label' in remapped_dataset.column_names and 'labels' not in remapped_dataset.column_names:
+                    logger.info("Renaming 'label' column to 'labels' for compatibility with data collator")
+                    remapped_dataset = remapped_dataset.rename_column('label', 'labels')
+                
+                return remapped_dataset
             
-            # Apply mapping to each example
-            remapped_dataset = dataset.map(map_example, desc="Remapping token IDs")
+            # Apply remapping to all datasets
+            train_dataset = remap_tokens(train_dataset)
+            eval_dataset = remap_tokens(eval_dataset)
+            test_dataset = remap_tokens(test_dataset)
             
-            # Rename 'label' to 'labels' if it exists (important for data collator compatibility)
-            if 'label' in remapped_dataset.column_names and 'labels' not in remapped_dataset.column_names:
-                logger.info("Renaming 'label' column to 'labels' for compatibility with data collator")
-                remapped_dataset = remapped_dataset.rename_column('label', 'labels')
+            logger.info(f"Created custom splits with sizes: train={len(train_dataset)}, validation={len(eval_dataset)}, test={len(test_dataset)}")
             
-            return remapped_dataset
-        
-        # Apply remapping to all datasets
-        train_dataset = remap_tokens(train_dataset)
-        eval_dataset = remap_tokens(eval_dataset)
-        test_dataset = remap_tokens(test_dataset)
-        
-        logger.info(f"Created custom splits with sizes: train={len(train_dataset)}, validation={len(eval_dataset)}, test={len(test_dataset)}")
-        
-    except ImportError as e:
-        logger.error(f"Failed to import split_utils module: {e}")
-        logger.error("Custom splits is now required. Please make sure split_utils.py is in your path.")
-        raise ImportError("Could not import split_utils module which is required for custom splits")
+        except ImportError as e:
+            logger.error(f"Failed to import split_utils module: {e}")
+            logger.error("Custom splits is now required. Please make sure split_utils.py is in your path.")
+            raise ImportError("Could not import split_utils module which is required for custom splits")
     
     # Setup trainer
-    trainer, metrics_callback = setup_training(
-        model, 
-        train_dataset, 
-        eval_dataset, 
-        args.task, 
-        args
-    )
+    if args.pruning_method == "no_pruning":
+        # For no_pruning, skip token remapping and use the standard tokenizer directly
+        trainer, metrics_callback = setup_training(
+            model, 
+            train_dataset, 
+            eval_dataset, 
+            args.task, 
+            args,
+            tokenizer=tokenizer  # Pass tokenizer for standard DataCollatorWithPadding
+        )
+    else:
+        # For pruning methods, use the standard setup with custom collators
+        trainer, metrics_callback = setup_training(
+            model, 
+            train_dataset, 
+            eval_dataset, 
+            args.task, 
+            args
+        )
     
     # Log initial vocabulary statistics
     logger.info(f"\n=== Vocabulary Statistics ===")
