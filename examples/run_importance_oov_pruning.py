@@ -39,7 +39,7 @@ IMPORTANCE_TYPE = 3
 # Dictionary of task-specific parameters
 TASK_PARAMS = {
     "cola": {
-        "epochs": 5,
+        "epochs": 8,
         "learning_rate": 8e-5,
         "batch_size": BATCH_SIZE,
         "weight_decay": 1e-6,
@@ -57,7 +57,7 @@ TASK_PARAMS = {
         "importance_type": IMPORTANCE_TYPE,
     },
     "mrpc": {
-        "epochs": 10,
+        "epochs": 15,
         "learning_rate": 5e-5,
         "batch_size": BATCH_SIZE,
         "weight_decay": 5e-6,
@@ -84,7 +84,7 @@ TASK_PARAMS = {
         "importance_type": IMPORTANCE_TYPE,
     },
     "rte": {
-        "epochs": 3,
+        "epochs": 10,
         "learning_rate": 5e-5,
         "batch_size": BATCH_SIZE,
         "weight_decay": 1e-5,

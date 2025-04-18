@@ -51,7 +51,7 @@ TASK_DEFAULTS = {
     "cola": {
         "batch_size": BATCH_SIZE, 
         "learning_rate": 8e-5, 
-        "epochs": 5,
+        "epochs": 8,
         "prune_percent": PRUNE_PERCENT,
         "importance_type": IMPORTANCE_TYPE
     },
@@ -65,7 +65,7 @@ TASK_DEFAULTS = {
     "mrpc": {
         "batch_size": BATCH_SIZE, 
         "learning_rate": 5e-5, 
-        "epochs": 10,
+        "epochs": 15,
         "prune_percent": PRUNE_PERCENT,
         "importance_type": IMPORTANCE_TYPE
     },
@@ -86,7 +86,7 @@ TASK_DEFAULTS = {
     "rte": {
         "batch_size": BATCH_SIZE, 
         "learning_rate": 5e-5, 
-        "epochs": 3,
+        "epochs": 10,
         "prune_percent": PRUNE_PERCENT,
         "importance_type": IMPORTANCE_TYPE
     },
