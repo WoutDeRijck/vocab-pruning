@@ -447,4 +447,204 @@ def prepare_cross_validation_datasets(
         else:
             logger.warning(f"Fold {fold_idx+1}: No 'label' column found in datasets")
         
-        yield train_dataset, val_dataset, test_dataset 
+        yield train_dataset, val_dataset, test_dataset
+
+def create_original_val_splits(
+    task_name: str,
+    train_ratio: float = 0.9,
+    test_ratio: float = 0.1,
+    random_seed: int = 42
+) -> Tuple[Dataset, Dataset, Dataset]:
+    """
+    Create train/test splits while preserving the original validation set.
+    This approach maintains the original GLUE validation set for evaluation,
+    and only splits the original train set into train/test parts.
+    
+    Args:
+        task_name: Name of the GLUE task
+        train_ratio: Proportion of original training data to keep for training (default: 0.9)
+        test_ratio: Proportion of original training data to use for testing (default: 0.1)
+        random_seed: Random seed for reproducibility
+        
+    Returns:
+        Tuple of (train_dataset, validation_dataset, test_dataset)
+    """
+    # Validate ratios sum to 1
+    total_ratio = train_ratio + test_ratio
+    if not np.isclose(total_ratio, 1.0):
+        raise ValueError(f"train_ratio + test_ratio must sum to 1.0, got {total_ratio}")
+    
+    # Handle 'mnli' special case
+    dataset_name = "mnli" if task_name.startswith("mnli") else task_name
+    logger.info(f"Loading {dataset_name} dataset")
+    
+    # Load original train and validation datasets
+    raw_datasets = load_dataset("glue", dataset_name)
+    
+    # Get split names for train and validation
+    train_split_name = "train"
+    
+    # For MNLI, the validation set is either validation_matched or validation_mismatched
+    if task_name == "mnli-matched":
+        valid_split_name = "validation_matched"
+    elif task_name == "mnli-mismatched":
+        valid_split_name = "validation_mismatched"
+    elif task_name == "mnli":
+        valid_split_name = "validation_matched"  # Default to matched for plain "mnli"
+    else:
+        valid_split_name = "validation"
+    
+    # Get original train and validation sets
+    train_dataset = raw_datasets[train_split_name]
+    valid_dataset = raw_datasets[valid_split_name]
+    
+    logger.info(f"Original train set size: {len(train_dataset)}")
+    logger.info(f"Original validation set size: {len(valid_dataset)}")
+    
+    # Check if the dataset has a 'label' column for stratification
+    if 'label' in train_dataset.column_names:
+        # Get labels for stratification
+        labels = train_dataset['label']
+        
+        # For regression tasks like STS-B, we can't do stratified splitting
+        is_regression = task_name == "stsb"
+        stratify = None if is_regression else labels
+        
+        # Split the training set into train and test
+        train_idx, test_idx = train_test_split(
+            np.arange(len(train_dataset)),
+            train_size=train_ratio,
+            test_size=test_ratio,
+            random_state=random_seed,
+            stratify=stratify
+        )
+        
+        # Create final train and test datasets
+        final_train_dataset = train_dataset.select(train_idx)
+        final_test_dataset = train_dataset.select(test_idx)
+    else:
+        # If no label column, just do a random split
+        logger.warning(f"No 'label' column found in dataset, using non-stratified split")
+        
+        # Split training set into train and test
+        train_idx, test_idx = train_test_split(
+            np.arange(len(train_dataset)),
+            train_size=train_ratio,
+            test_size=test_ratio,
+            random_state=random_seed
+        )
+        
+        # Create final datasets
+        final_train_dataset = train_dataset.select(train_idx)
+        final_test_dataset = train_dataset.select(test_idx)
+    
+    # Use the original validation set
+    final_valid_dataset = valid_dataset
+    
+    # Log resulting split sizes
+    total_size = len(train_dataset) + len(valid_dataset)
+    logger.info(f"New train set size: {len(final_train_dataset)} ({len(final_train_dataset)/total_size*100:.1f}% of total)")
+    logger.info(f"Validation set size (unchanged): {len(final_valid_dataset)} ({len(final_valid_dataset)/total_size*100:.1f}% of total)")
+    logger.info(f"New test set size: {len(final_test_dataset)} ({len(final_test_dataset)/total_size*100:.1f}% of total)")
+    
+    # For classification tasks, verify label distribution
+    if 'label' in train_dataset.column_names and task_name != "stsb":
+        # Count train set label distribution
+        train_label_counts = {}
+        for label in final_train_dataset['label']:
+            train_label_counts[label] = train_label_counts.get(label, 0) + 1
+            
+        # Count test set label distribution
+        test_label_counts = {}
+        for label in final_test_dataset['label']:
+            test_label_counts[label] = test_label_counts.get(label, 0) + 1
+        
+        # Log label distributions
+        logger.info("Label distribution in train/test splits:")
+        for label in sorted(train_label_counts.keys()):
+            train_pct = train_label_counts.get(label, 0) / len(final_train_dataset) * 100
+            test_pct = test_label_counts.get(label, 0) / len(final_test_dataset) * 100
+            logger.info(f"  Label {label}: train={train_pct:.1f}%, test={test_pct:.1f}%")
+    
+    return final_train_dataset, final_valid_dataset, final_test_dataset
+
+def prepare_original_val_datasets(
+    task_name: str,
+    tokenizer,
+    train_ratio: float = 0.9,
+    test_ratio: float = 0.1,
+    max_length: int = 128,
+    random_seed: int = 42
+) -> Tuple[Dataset, Dataset, Dataset]:
+    """
+    Create splits that preserve the original validation set, and tokenize them ready for model training.
+    
+    Args:
+        task_name: Name of the GLUE task
+        tokenizer: Tokenizer to use
+        train_ratio: Proportion of original training data to keep for training (default: 0.9)
+        test_ratio: Proportion of original training data to use for testing (default: 0.1)
+        max_length: Maximum sequence length
+        random_seed: Random seed
+        
+    Returns:
+        Tuple of prepared (train_dataset, validation_dataset, test_dataset)
+    """
+    # First create the splits
+    train_dataset, valid_dataset, test_dataset = create_original_val_splits(
+        task_name=task_name,
+        train_ratio=train_ratio,
+        test_ratio=test_ratio,
+        random_seed=random_seed
+    )
+    
+    # Get input keys for this task
+    sentence1_key, sentence2_key = task_to_keys[task_name.replace("-matched", "").replace("-mismatched", "")]
+    
+    # Define preprocessing function to match exactly what's in the notebook
+    def preprocess_function(examples):
+        # Handle single sentence or sentence pairs
+        if sentence2_key is None:
+            # Single sentence classification
+            result = tokenizer(
+                examples[sentence1_key],
+                padding="max_length",  # Changed from False to max_length to match notebook
+                truncation=True,
+                max_length=max_length
+            )
+        else:
+            # Sentence pair classification/regression
+            result = tokenizer(
+                examples[sentence1_key],
+                examples[sentence2_key],
+                padding="max_length",  # Changed from False to max_length to match notebook
+                truncation=True,
+                max_length=max_length
+            )
+        
+        # Make sure to have 'labels' (not 'label') for compatibility with HF Trainer
+        if 'label' in examples and 'labels' not in examples:
+            result['labels'] = examples['label']
+        
+        return result
+    
+    # Apply preprocessing to all datasets
+    train_dataset = train_dataset.map(
+        preprocess_function,
+        batched=True,
+        desc="Preprocessing train set"
+    )
+    
+    valid_dataset = valid_dataset.map(
+        preprocess_function,
+        batched=True,
+        desc="Preprocessing validation set"
+    )
+    
+    test_dataset = test_dataset.map(
+        preprocess_function,
+        batched=True,
+        desc="Preprocessing test set"
+    )
+    
+    return train_dataset, valid_dataset, test_dataset 

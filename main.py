@@ -772,22 +772,21 @@ def run_standard_pipeline(args, tokenizer):
     logger.info("Creating custom train/validation/test splits")
     try:
         # Import custom splitting utilities
-        from split_utils import prepare_custom_split_datasets
+        from split_utils import prepare_custom_split_datasets, prepare_original_val_datasets
         
-        # Create custom splits
-        train_dataset, eval_dataset, test_dataset = prepare_custom_split_datasets(
+        # Use original validation set with train/test split instead of fully custom splits
+        train_dataset, eval_dataset, test_dataset = prepare_original_val_datasets(
             task_name=args.task,
             tokenizer=tokenizer,
-            train_ratio=args.train_ratio,
-            validation_ratio=args.validation_ratio,
-            test_ratio=args.test_ratio,
-            max_length=128,  # Same as in original prepare_datasets_with_mapping
+            train_ratio=0.9,  # Use 90% of original training data for training
+            test_ratio=0.1,   # Use 10% of original training data for testing
+            max_length=128,   # Same as in original prepare_datasets_with_mapping
             random_seed=args.seed
         )
         
         # For no_pruning, we'll use the datasets as-is (no remapping needed)
         if args.pruning_method == "no_pruning":
-            logger.info("Using custom splits without token remapping for no_pruning baseline")
+            logger.info("Using original validation set with train/test split without token remapping for no_pruning baseline")
             # Just make sure the label column is named correctly
             for dataset in [train_dataset, eval_dataset, test_dataset]:
                 if dataset is not None and 'label' in dataset.column_names and 'labels' not in dataset.column_names:
@@ -877,7 +876,7 @@ def run_standard_pipeline(args, tokenizer):
         logger.info(f"Vocabulary reduction: {(1 - len(token_map)/len(tokenizer.get_vocab()))*100:.2f}%")
     
     # Log custom split ratios
-    logger.info(f"Using custom splits with ratios: train={args.train_ratio}, val={args.validation_ratio}, test={args.test_ratio}")
+    logger.info(f"Using original validation set with train/test split: train=90% of original train set, test=10% of original train set")
     
     # Train and evaluate
     logger.info(f"Starting training for {args.epochs} epochs")
