@@ -20,6 +20,13 @@ import pandas as pd
 from datetime import datetime
 import glob
 
+# Ensure NLTK resources are available
+try:
+    import nltk
+    nltk.download('stopwords', quiet=True)
+except Exception as e:
+    logging.warning(f"Could not download NLTK stopwords: {e}")
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,

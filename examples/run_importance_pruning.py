@@ -22,11 +22,12 @@ import pandas as pd
 from datetime import datetime
 import glob
 
-# Add parent directory to path to import modules
-sys.path.append('..')
-
-from main import run_pipeline
-from utils import set_seed
+# Ensure NLTK resources are available
+try:
+    import nltk
+    nltk.download('stopwords', quiet=True)
+except Exception as e:
+    logging.warning(f"Could not download NLTK stopwords: {e}")
 
 # Configure logging
 logging.basicConfig(
@@ -286,9 +287,6 @@ def parse_log_file(log_file):
 def main():
     """Main function to run Word Importance-based pruning without OOV on multiple tasks."""
     args = parse_args()
-    
-    # Set random seed
-    set_seed(args.seed)
     
     # Create output directory
     os.makedirs(args.output_dir, exist_ok=True)

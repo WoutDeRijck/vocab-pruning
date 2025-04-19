@@ -9,3 +9,4 @@ evaluate
 tqdm
 nltk
 accelerate
+matplotlib
