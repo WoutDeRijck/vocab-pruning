@@ -18,6 +18,7 @@ import os
 import re
 import pandas as pd
 from datetime import datetime
+import glob
 
 # Configure logging
 logging.basicConfig(
@@ -330,14 +331,28 @@ def main():
             # Find the log file for this task
             log_file = os.path.join(
                 task_output_dir, 
-                f"{task}_importance_oov_prune{task_params['prune_percent']}_clusters{task_params['num_clusters']}_type{task_params['importance_type']}.log"
+                f"{task}_importance_oov_prune{int(task_params['prune_percent'])}_clusters{int(task_params['num_clusters'])}_type{task_params['importance_type']}.log"
             )
+            # Try alternative filename if not found
+            if not os.path.exists(log_file):
+                log_file = os.path.join(
+                    task_output_dir, 
+                    f"{task}_importance_oov_prune{task_params['prune_percent']}_clusters{task_params['num_clusters']}_type{task_params['importance_type']}.log"
+                )
+            # Try a pattern-based search as a fallback
+            if not os.path.exists(log_file):
+                pattern = f"{task}_importance_oov_prune*_clusters*_type{task_params['importance_type']}.log"
+                matching_files = glob.glob(os.path.join(task_output_dir, pattern))
+                if matching_files:
+                    log_file = matching_files[0]
+            
             if os.path.exists(log_file):
                 # Parse results from the log file
                 task_results = parse_log_file(log_file)
                 all_results[task] = task_results
             else:
                 logger.warning(f"Log file not found for task {task}")
+                logger.warning(f"Tried looking for: {os.path.join(task_output_dir, f'{task}_importance_oov_prune*_clusters*_type{task_params['importance_type']}.log')}")
                 
         except subprocess.CalledProcessError as e:
             logger.error(f"Error running word importance-based OOV pruning for task {task}: {e}")

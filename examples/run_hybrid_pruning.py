@@ -14,6 +14,10 @@ import argparse
 import logging
 import subprocess
 import os
+import re
+import pandas as pd
+from datetime import datetime
+import glob
 
 # Configure logging
 logging.basicConfig(
@@ -253,6 +257,79 @@ def main():
         except subprocess.CalledProcessError as e:
             logger.error(f"Error running frequency-based OOV pruning for task {task}: {e}")
             continue
+        
+        # Find the log file for this task
+        log_file = os.path.join(
+            task_output_dir, 
+            f"{task}_frequency_oov_prune{int(task_params['prune_percent'])}_clusters{int(task_params['num_clusters'])}.log"
+        )
+        # Try alternative filename if not found
+        if not os.path.exists(log_file):
+            log_file = os.path.join(
+                task_output_dir, 
+                f"{task}_frequency_oov_prune{task_params['prune_percent']}_clusters{task_params['num_clusters']}.log"
+            )
+        # Try a pattern-based search as a fallback
+        if not os.path.exists(log_file):
+            pattern = f"{task}_frequency_oov_prune*_clusters*.log"
+            matching_files = glob.glob(os.path.join(task_output_dir, pattern))
+            if matching_files:
+                log_file = matching_files[0]
+        
+        if os.path.exists(log_file):
+            # Parse results from the log file
+            task_results = parse_log_file(log_file)
+            all_results[task] = task_results
+        else:
+            logger.warning(f"Log file not found for task {task}")
+            logger.warning(f"Tried looking for: {os.path.join(task_output_dir, f'{task}_frequency_oov_prune*_clusters*.log')}")
+    
+    # Create summary of results
+    if all_results:
+        logger.info("\n" + "=" * 80)
+        logger.info("SUMMARY OF RESULTS")
+        logger.info("=" * 80)
+        
+        # Create DataFrame for test results
+        test_metrics = {}
+        for task, metrics in all_results.items():
+            test_metrics[task] = {k: v for k, v in metrics.items() if k.startswith("test_")}
+        
+        test_df = pd.DataFrame.from_dict(test_metrics, orient='index')
+        if not test_df.empty:
+            # Clean up column names for display
+            test_df.columns = [col.replace("test_", "") for col in test_df.columns]
+            
+            logger.info("\nTest Results:")
+            logger.info("\n" + test_df.to_string())
+        
+        # Create DataFrame for parameter reduction statistics
+        param_metrics = {}
+        for task, metrics in all_results.items():
+            param_metrics[task] = {
+                "vocab_reduction": metrics.get("vocab_reduction", 0),
+                "total_param_reduction": metrics.get("total_param_reduction", 0),
+                "embedding_param_reduction": metrics.get("embedding_param_reduction", 0),
+                "model_only_param_reduction": metrics.get("model_only_param_reduction", 0)
+            }
+        
+        param_df = pd.DataFrame.from_dict(param_metrics, orient='index')
+        if not param_df.empty and param_df.sum().sum() > 0:  # Check if we have any non-zero reductions
+            logger.info("\nParameter Reduction Statistics:")
+            logger.info("\n" + param_df.to_string())
+        
+        # Save summary to file
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        summary_file = os.path.join(args.output_dir, f"summary_results_{timestamp}.csv")
+        
+        # Combine all metrics
+        all_metrics = {}
+        for task in all_results:
+            all_metrics[task] = all_results[task]
+        
+        summary_df = pd.DataFrame.from_dict(all_metrics, orient='index')
+        summary_df.to_csv(summary_file)
+        logger.info(f"\nSaved detailed summary to {summary_file}")
     
     logger.info("\nAll tasks completed!")
 

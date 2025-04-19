@@ -16,6 +16,7 @@ import os
 import re
 import pandas as pd
 from datetime import datetime
+import glob
 
 # Configure logging
 logging.basicConfig(
@@ -266,12 +267,20 @@ def main():
             
             # Find the log file for this task
             log_file = os.path.join(task_output_dir, f"{task}_train_only.log")
+            # Try a pattern-based search as a fallback
+            if not os.path.exists(log_file):
+                pattern = f"{task}_train_only*.log"
+                matching_files = glob.glob(os.path.join(task_output_dir, pattern))
+                if matching_files:
+                    log_file = matching_files[0]
+                    
             if os.path.exists(log_file):
                 # Parse results from the log file
                 task_results = parse_log_file(log_file)
                 all_results[task] = task_results
             else:
                 logger.warning(f"Log file not found for task {task}")
+                logger.warning(f"Tried looking for: {os.path.join(task_output_dir, f'{task}_train_only*.log')}")
                 
         except subprocess.CalledProcessError as e:
             logger.error(f"Error running train-only pruning for task {task}: {e}")

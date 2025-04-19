@@ -20,6 +20,7 @@ import subprocess
 import re
 import pandas as pd
 from datetime import datetime
+import glob
 
 # Add parent directory to path to import modules
 sys.path.append('..')
@@ -121,11 +122,11 @@ def parse_args():
     
     # Task and model arguments
     parser.add_argument(
-        "--task", 
+        "--tasks", 
         type=str, 
-        default="mrpc", 
-        choices=GLUE_TASKS,
-        help="GLUE task name"
+        nargs="+",
+        default=list(TASK_DEFAULTS.keys()),
+        help="GLUE tasks to run (default: all)"
     )
     
     parser.add_argument(
@@ -149,6 +150,14 @@ def parse_args():
         default=None,
         choices=[0, 1, 2, 3],
         help="Word importance calculation type: 0=off, 1=no norm, 2=L1 norm, 3=L2 norm (overrides task defaults)"
+    )
+    
+    # Output directory
+    parser.add_argument(
+        "--output_dir", 
+        type=str, 
+        default="./importance_pruning_output",
+        help="Output directory for model checkpoints and logs"
     )
     
     # Training arguments
@@ -275,87 +284,143 @@ def parse_log_file(log_file):
     return metrics
 
 def main():
-    """Main function to run Word Importance-based pruning without OOV."""
+    """Main function to run Word Importance-based pruning without OOV on multiple tasks."""
     args = parse_args()
     
     # Set random seed
     set_seed(args.seed)
     
-    # Apply task-specific defaults unless overridden
-    task_name = args.task
-    batch_size = args.batch_size if args.batch_size is not None else TASK_DEFAULTS[task_name]["batch_size"]
-    learning_rate = args.learning_rate if args.learning_rate is not None else TASK_DEFAULTS[task_name]["learning_rate"]
-    epochs = args.epochs if args.epochs is not None else TASK_DEFAULTS[task_name]["epochs"]
-    prune_percent = args.prune_percent if args.prune_percent is not None else TASK_DEFAULTS[task_name]["prune_percent"]
-    importance_type = args.importance_type if args.importance_type is not None else TASK_DEFAULTS[task_name]["importance_type"]
+    # Create output directory
+    os.makedirs(args.output_dir, exist_ok=True)
     
-    # Create timestamped output directory
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    output_dir = f"../results/{task_name}_importance_prune{prune_percent}_type{importance_type}_{timestamp}"
-    os.makedirs(output_dir, exist_ok=True)
+    # Log arguments
+    logger.info(f"Running with arguments: {args}")
     
-    # Set up configuration for the run
-    config = argparse.Namespace(
-        task=task_name,
-        model_name=args.model_name,
-        pruning_method="importance",  # Specify pruning method as importance (no OOV)
-        prune_percent=prune_percent,
-        importance_type=importance_type,
-        epochs=epochs,
-        learning_rate=learning_rate,
-        weight_decay=args.weight_decay,
-        batch_size=batch_size,
-        cross_validation=args.cross_validation,
-        n_folds=args.n_folds,
-        train_ratio=args.train_ratio,
-        validation_ratio=args.validation_ratio,
-        test_ratio=args.test_ratio,
-        output_dir=output_dir,
-        seed=args.seed
-    )
+    # Dictionary to store results for each task
+    all_results = {}
     
-    # Log configuration
-    logger.info(f"Running Word Importance-based pruning (without OOV) on {task_name} with {prune_percent}% pruning")
-    logger.info(f"Importance type: {importance_type}")
-    logger.info(f"Output directory: {output_dir}")
+    # Process each task
+    for task_name in args.tasks:
+        logger.info(f"\n{'=' * 50}")
+        logger.info(f"Running Word Importance-based pruning for task: {task_name}")
+        logger.info(f"{'=' * 50}")
+        
+        # Apply task-specific defaults unless overridden
+        batch_size = args.batch_size if args.batch_size is not None else TASK_DEFAULTS[task_name]["batch_size"]
+        learning_rate = args.learning_rate if args.learning_rate is not None else TASK_DEFAULTS[task_name]["learning_rate"]
+        epochs = args.epochs if args.epochs is not None else TASK_DEFAULTS[task_name]["epochs"]
+        prune_percent = args.prune_percent if args.prune_percent is not None else TASK_DEFAULTS[task_name]["prune_percent"]
+        importance_type = args.importance_type if args.importance_type is not None else TASK_DEFAULTS[task_name]["importance_type"]
+        
+        # Create task-specific output directory
+        task_output_dir = os.path.join(args.output_dir, task_name)
+        os.makedirs(task_output_dir, exist_ok=True)
+        
+        # Log task parameters
+        logger.info(f"Parameters: batch_size={batch_size}, learning_rate={learning_rate}, "
+                  f"epochs={epochs}, prune_percent={prune_percent}, "
+                  f"importance_type={importance_type}")
+        
+        # Build command for the main script
+        cmd = [
+            "python", MAIN_SCRIPT_PATH,
+            "--task", task_name,
+            "--model_name", args.model_name,
+            "--pruning_method", "importance",
+            "--prune_percent", str(prune_percent),
+            "--epochs", str(epochs),
+            "--learning_rate", str(learning_rate),
+            "--batch_size", str(batch_size),
+            "--weight_decay", str(args.weight_decay),
+            "--importance_type", str(importance_type),
+            "--output_dir", task_output_dir,
+            "--seed", str(args.seed),
+        ]
+        
+        # Run the command
+        logger.info(f"Running command: {' '.join(cmd)}")
+        try:
+            subprocess.run(cmd, check=True)
+            logger.info(f"Successfully completed importance pruning for task: {task_name}")
+            
+            # Find the log file for this task
+            log_file = os.path.join(
+                task_output_dir, 
+                f"{task_name}_importance_prune{int(prune_percent)}_type{importance_type}.log"
+            )
+            # Try alternative filename if not found
+            if not os.path.exists(log_file):
+                log_file = os.path.join(
+                    task_output_dir, 
+                    f"{task_name}_importance_prune{prune_percent}_type{importance_type}.log"
+                )
+            # Try a pattern-based search as a fallback
+            if not os.path.exists(log_file):
+                pattern = f"{task_name}_importance_prune*_type{importance_type}.log"
+                matching_files = glob.glob(os.path.join(task_output_dir, pattern))
+                if matching_files:
+                    log_file = matching_files[0]
+            
+            if os.path.exists(log_file):
+                # Parse results from the log file
+                task_results = parse_log_file(log_file)
+                all_results[task_name] = task_results
+            else:
+                logger.warning(f"Log file not found for task {task_name}")
+                logger.warning(f"Tried looking for: {os.path.join(task_output_dir, f'{task_name}_importance_prune*_type{importance_type}.log')}")
+                
+        except subprocess.CalledProcessError as e:
+            logger.error(f"Error running importance pruning for task {task_name}: {e}")
+            continue
     
-    for key, value in vars(config).items():
-        logger.info(f"{key}: {value}")
+    # Create summary of results
+    if all_results:
+        logger.info("\n" + "=" * 80)
+        logger.info("SUMMARY OF RESULTS")
+        logger.info("=" * 80)
+        
+        # Create DataFrame for test results
+        test_metrics = {}
+        for task, metrics in all_results.items():
+            test_metrics[task] = {k: v for k, v in metrics.items() if k.startswith("test_")}
+        
+        test_df = pd.DataFrame.from_dict(test_metrics, orient='index')
+        if not test_df.empty:
+            # Clean up column names for display
+            test_df.columns = [col.replace("test_", "") for col in test_df.columns]
+            
+            logger.info("\nTest Results:")
+            logger.info("\n" + test_df.to_string())
+        
+        # Create DataFrame for parameter reduction statistics
+        param_metrics = {}
+        for task, metrics in all_results.items():
+            param_metrics[task] = {
+                "vocab_reduction": metrics.get("vocab_reduction", 0),
+                "total_param_reduction": metrics.get("total_param_reduction", 0),
+                "embedding_param_reduction": metrics.get("embedding_param_reduction", 0),
+                "model_only_param_reduction": metrics.get("model_only_param_reduction", 0)
+            }
+        
+        param_df = pd.DataFrame.from_dict(param_metrics, orient='index')
+        if not param_df.empty and param_df.sum().sum() > 0:  # Check if we have any non-zero reductions
+            logger.info("\nParameter Reduction Statistics:")
+            logger.info("\n" + param_df.to_string())
+        
+        # Save summary to file
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        summary_file = os.path.join(args.output_dir, f"summary_results_{timestamp}.csv")
+        
+        # Combine all metrics
+        all_metrics = {}
+        for task in all_results:
+            all_metrics[task] = all_results[task]
+        
+        summary_df = pd.DataFrame.from_dict(all_metrics, orient='index')
+        summary_df.to_csv(summary_file)
+        logger.info(f"\nSaved detailed summary to {summary_file}")
     
-    # Build command for the main script
-    cmd = [
-        "python", MAIN_SCRIPT_PATH,
-        "--task", task_name,
-        "--model_name", args.model_name,
-        "--pruning_method", "importance",
-        "--prune_percent", str(prune_percent),
-        "--epochs", str(epochs),
-        "--learning_rate", str(learning_rate),
-        "--batch_size", str(batch_size),
-        "--weight_decay", str(args.weight_decay),
-        "--importance_type", str(importance_type),
-        "--output_dir", output_dir,
-        "--seed", str(args.seed),
-    ]
-    
-    # Run the pruning pipeline
-    results_df, model = run_pipeline(config)
-    
-    logger.info(f"Word Importance-based pruning (without OOV) completed successfully")
-    
-    # Find the log file for this task
-    log_file = os.path.join(
-        output_dir, 
-        f"{task_name}_importance_prune{prune_percent}_type{importance_type}.log"
-    )
-    if os.path.exists(log_file):
-        # Parse results from the log file
-        task_results = parse_log_file(log_file)
-        results_df = pd.DataFrame(task_results, index=[0])
-    else:
-        logger.warning(f"Log file not found for task {task_name}")
-    
-    return results_df, model
+    logger.info("\nAll tasks completed!")
 
 if __name__ == "__main__":
     main() 
