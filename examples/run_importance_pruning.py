@@ -367,7 +367,8 @@ def main():
                 all_results[task_name] = task_results
             else:
                 logger.warning(f"Log file not found for task {task_name}")
-                logger.warning(f"Tried looking for: {os.path.join(task_output_dir, f'{task_name}_importance_prune*_type{importance_type}.log')}")
+                pattern_path = os.path.join(task_output_dir, f"{task_name}_importance_prune*_type{importance_type}.log")
+                logger.warning(f"Tried looking for: {pattern_path}")
                 
         except subprocess.CalledProcessError as e:
             logger.error(f"Error running importance pruning for task {task_name}: {e}")

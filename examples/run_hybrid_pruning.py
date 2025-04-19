@@ -282,7 +282,8 @@ def main():
             all_results[task] = task_results
         else:
             logger.warning(f"Log file not found for task {task}")
-            logger.warning(f"Tried looking for: {os.path.join(task_output_dir, f'{task}_frequency_oov_prune*_clusters*.log')}")
+            pattern_path = os.path.join(task_output_dir, f"{task}_frequency_oov_prune*_clusters*.log")
+            logger.warning(f"Tried looking for: {pattern_path}")
     
     # Create summary of results
     if all_results:

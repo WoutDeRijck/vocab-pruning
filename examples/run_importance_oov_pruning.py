@@ -352,7 +352,8 @@ def main():
                 all_results[task] = task_results
             else:
                 logger.warning(f"Log file not found for task {task}")
-                logger.warning(f"Tried looking for: {os.path.join(task_output_dir, f'{task}_importance_oov_prune*_clusters*_type{task_params['importance_type']}.log')}")
+                pattern_path = os.path.join(task_output_dir, f"{task}_importance_oov_prune*_clusters*_type{task_params['importance_type']}.log")
+                logger.warning(f"Tried looking for: {pattern_path}")
                 
         except subprocess.CalledProcessError as e:
             logger.error(f"Error running word importance-based OOV pruning for task {task}: {e}")

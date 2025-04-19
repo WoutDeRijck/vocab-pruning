@@ -280,7 +280,8 @@ def main():
                 all_results[task] = task_results
             else:
                 logger.warning(f"Log file not found for task {task}")
-                logger.warning(f"Tried looking for: {os.path.join(task_output_dir, f'{task}_train_only*.log')}")
+                pattern_path = os.path.join(task_output_dir, f"{task}_train_only*.log")
+                logger.warning(f"Tried looking for: {pattern_path}")
                 
         except subprocess.CalledProcessError as e:
             logger.error(f"Error running train-only pruning for task {task}: {e}")
