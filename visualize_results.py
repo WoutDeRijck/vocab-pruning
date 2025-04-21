@@ -26,6 +26,9 @@ train_tokens_test = []
 random_test = []
 clustering_test = []
 frequency_test = []
+importance_test = []
+frequency_oov_test = []
+importance_oov_test = []
 
 # Also track training performance
 no_pruning_train = []
@@ -33,6 +36,7 @@ train_tokens_train = []
 random_train = []
 clustering_train = []
 frequency_train = []
+importance_train = []
 
 with open('Results - Blad1.csv', 'r') as f:
     reader = csv.reader(f)
@@ -58,6 +62,10 @@ with open('Results - Blad1.csv', 'r') as f:
                 frequency_train.append(parse_value(row[10]))
             else:
                 frequency_train.append(0.0)
+            if len(row) > 12:
+                importance_train.append(parse_value(row[12]))
+            else:
+                importance_train.append(0.0)
             
             # Test results
             no_pruning_test.append(parse_value(row[3]))
@@ -71,6 +79,18 @@ with open('Results - Blad1.csv', 'r') as f:
                 frequency_test.append(parse_value(row[11]))
             else:
                 frequency_test.append(0.0)
+            if len(row) > 13:
+                importance_test.append(parse_value(row[13]))
+            else:
+                importance_test.append(0.0)
+            if len(row) > 14:
+                frequency_oov_test.append(parse_value(row[14]))
+            else:
+                frequency_oov_test.append(0.0)
+            if len(row) > 15:
+                importance_oov_test.append(parse_value(row[15]))
+            else:
+                importance_oov_test.append(0.0)
 
 # Create DataFrames for plotting train and test results
 test_df = pd.DataFrame({
@@ -79,7 +99,10 @@ test_df = pd.DataFrame({
     'TRAIN TOKENS ONLY': train_tokens_test,
     'RANDOM': random_test,
     'CLUSTERING': clustering_test,
-    'FREQUENCY': frequency_test
+    'FREQUENCY': frequency_test,
+    'IMPORTANCE': importance_test,
+    'FREQUENCY_OOV': frequency_oov_test,
+    'IMPORTANCE_OOV': importance_oov_test
 }, index=datasets)
 
 train_df = pd.DataFrame({
@@ -87,7 +110,8 @@ train_df = pd.DataFrame({
     'TRAIN TOKENS ONLY': train_tokens_train,
     'RANDOM': random_train,
     'CLUSTERING': clustering_train,
-    'FREQUENCY': frequency_train
+    'FREQUENCY': frequency_train,
+    'IMPORTANCE': importance_train
 }, index=datasets)
 
 # Print the DataFrame to verify data
@@ -95,8 +119,8 @@ print("Test Results DataFrame:")
 print(test_df)
 
 # Define the list of methods for consistent reference
-methods = ['NO PRUNING', 'TRAIN TOKENS ONLY', 'RANDOM', 'CLUSTERING', 'FREQUENCY']
-colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd']
+methods = ['NO PRUNING', 'TRAIN TOKENS ONLY', 'RANDOM', 'CLUSTERING', 'FREQUENCY', 'IMPORTANCE', 'FREQUENCY_OOV', 'IMPORTANCE_OOV']
+colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b', '#e377c2', '#7f7f7f']
 method_colors = dict(zip(methods, colors))
 
 # Calculate and print performance drop from baseline
@@ -120,9 +144,9 @@ test_df = test_df.sort_values(by='NO PRUNING', ascending=False)
 train_df = train_df.loc[test_df.index]  # Keep the same ordering
 
 # VISUALIZATION 1: Bar chart comparing test performance across methods
-plt.figure(figsize=(14, 8))
+plt.figure(figsize=(18, 10))
 x = np.arange(len(test_df))
-width = 0.14
+width = 0.09
 multiplier = 0
 
 for method in methods:
@@ -132,13 +156,13 @@ for method in methods:
 
 # Add paper results as horizontal lines for each dataset
 for i, (dataset, row) in enumerate(test_df.iterrows()):
-    plt.plot([i - width*2, i + width*5], [row['PAPER'], row['PAPER']], 'k--', alpha=0.7)
+    plt.plot([i - width*3, i + width*8], [row['PAPER'], row['PAPER']], 'k--', alpha=0.7)
 
 # Add labels and title
 plt.xlabel('Dataset', fontsize=12)
 plt.ylabel('Test Performance', fontsize=12)
 plt.title('Comparison of Pruning Methods Across GLUE Datasets', fontsize=14)
-plt.xticks(x + width * 2, test_df.index, rotation=45, fontsize=10)
+plt.xticks(x + width * 3.5, test_df.index, rotation=45, fontsize=10)
 plt.legend(loc='lower left', fontsize=10)
 plt.grid(axis='y', linestyle='--', alpha=0.7)
 
@@ -148,14 +172,14 @@ for i, method in enumerate(methods):
         if value > 0:  # Only add label if value is greater than 0
             plt.text(j + width * (i - 0.5), value + 0.01, 
                      f'{value:.3f}', ha='center', va='bottom', 
-                     fontsize=8, rotation=90)
+                     fontsize=7, rotation=90)
 
 plt.tight_layout()
 plt.savefig('plots/pruning_comparison_bar.png', dpi=300, bbox_inches='tight')
 plt.show()
 
 # VISUALIZATION 2: Line chart for easy comparison
-plt.figure(figsize=(14, 8))
+plt.figure(figsize=(18, 10))
 
 # Create x positions for each dataset
 x_positions = np.arange(len(test_df))
@@ -180,11 +204,11 @@ plt.savefig('plots/pruning_comparison_line.png', dpi=300, bbox_inches='tight')
 plt.show()
 
 # VISUALIZATION 3: Bar chart showing performance drop from baseline
-plt.figure(figsize=(14, 8))
+plt.figure(figsize=(18, 10))
 drop_df = drop_df.loc[test_df.index]  # Sort in the same order
 
 x = np.arange(len(drop_df))
-width = 0.18
+width = 0.1
 multiplier = 0
 
 for method in methods[1:]:  # Skip NO PRUNING
@@ -195,7 +219,7 @@ for method in methods[1:]:  # Skip NO PRUNING
 plt.xlabel('Dataset', fontsize=12)
 plt.ylabel('Performance Drop (%)', fontsize=12)
 plt.title('Performance Drop Compared to No Pruning', fontsize=14)
-plt.xticks(x + width * 1.5, drop_df.index, rotation=45, fontsize=10)
+plt.xticks(x + width * 3, drop_df.index, rotation=45, fontsize=10)
 plt.legend(fontsize=10)
 plt.grid(axis='y', linestyle='--', alpha=0.7)
 
@@ -212,7 +236,10 @@ plt.savefig('plots/performance_drop.png', dpi=300, bbox_inches='tight')
 plt.show()
 
 # VISUALIZATION 4: Train vs Test performance comparison (for generalization assessment)
-for method in methods:
+# Only include methods that have training data
+train_test_methods = ['NO PRUNING', 'TRAIN TOKENS ONLY', 'RANDOM', 'CLUSTERING', 'FREQUENCY', 'IMPORTANCE']
+
+for method in train_test_methods:
     plt.figure(figsize=(12, 6))
     
     # Set up the bar positions
@@ -254,11 +281,11 @@ for method in methods:
     plt.show()
 
 # VISUALIZATION 5: Performance relative to published results
-plt.figure(figsize=(14, 8))
+plt.figure(figsize=(18, 10))
 paper_diff_df = paper_diff_df.loc[test_df.index]  # Sort in the same order
 
 x = np.arange(len(paper_diff_df))
-width = 0.14
+width = 0.09
 multiplier = 0
 
 for method in methods:
@@ -269,7 +296,7 @@ for method in methods:
 plt.xlabel('Dataset', fontsize=12)
 plt.ylabel('Performance Relative to Paper (%)', fontsize=12)
 plt.title('Performance Compared to Published Results', fontsize=14)
-plt.xticks(x + width * 2, paper_diff_df.index, rotation=45, fontsize=10)
+plt.xticks(x + width * 3.5, paper_diff_df.index, rotation=45, fontsize=10)
 plt.legend(fontsize=10)
 plt.grid(axis='y', linestyle='--', alpha=0.7)
 plt.axhline(y=0, color='k', linestyle='-', alpha=0.3)
@@ -280,7 +307,7 @@ for i, method in enumerate(methods):
         if abs(value) > 1:  # Only add label if difference is more than 1%
             plt.text(j + width * (i - 0.5), value + (0.5 if value >= 0 else -1.5), 
                      f'{value:.1f}', ha='center', va='bottom', 
-                     fontsize=8)
+                     fontsize=7)
 
 plt.tight_layout()
 plt.savefig('plots/paper_comparison.png', dpi=300, bbox_inches='tight')
@@ -302,7 +329,7 @@ print("\nAverage Performance Summary:")
 print(avg_performance)
 
 # VISUALIZATION 7: Average performance bar chart
-plt.figure(figsize=(10, 6))
+plt.figure(figsize=(12, 6))
 bars = plt.bar(avg_performance['Method'], avg_performance['Avg Test Performance'], 
               color=[method_colors.get(m, 'gray') for m in avg_performance['Method']])
 
@@ -311,6 +338,7 @@ plt.ylabel('Average Performance', fontsize=12)
 plt.title('Average Performance Across All Datasets', fontsize=14)
 plt.ylim(0.6, 0.9)
 plt.grid(axis='y', linestyle='--', alpha=0.7)
+plt.xticks(rotation=45)
 
 # Add value labels above bars
 for bar in bars:
@@ -321,4 +349,64 @@ for bar in bars:
 
 plt.tight_layout()
 plt.savefig('plots/average_performance.png', dpi=300, bbox_inches='tight')
+plt.show()
+
+# VISUALIZATION 8: OOV vs. regular performance comparison
+plt.figure(figsize=(14, 8))
+
+# Set up the bar positions
+x = np.arange(len(test_df))
+width = 0.2
+
+# Create the bars for FREQUENCY and FREQUENCY_OOV
+plt.bar(x - width/2, test_df['FREQUENCY'], width, label='FREQUENCY', color=method_colors['FREQUENCY'], alpha=0.7)
+plt.bar(x + width/2, test_df['FREQUENCY_OOV'], width, label='FREQUENCY_OOV', color=method_colors['FREQUENCY_OOV'], alpha=0.7)
+
+# Add labels and title
+plt.xlabel('Dataset', fontsize=12)
+plt.ylabel('Performance', fontsize=12)
+plt.title('Regular vs OOV Frequency Pruning Performance', fontsize=14)
+plt.xticks(x, test_df.index, rotation=45, fontsize=10)
+plt.legend(fontsize=10)
+plt.grid(axis='y', linestyle='--', alpha=0.3)
+
+# Add value labels
+for i in range(len(test_df)):
+    plt.text(i - width/2, test_df['FREQUENCY'].iloc[i] + 0.01, 
+             f'{test_df["FREQUENCY"].iloc[i]:.3f}', ha='center', va='bottom', fontsize=8)
+    plt.text(i + width/2, test_df['FREQUENCY_OOV'].iloc[i] + 0.01, 
+             f'{test_df["FREQUENCY_OOV"].iloc[i]:.3f}', ha='center', va='bottom', fontsize=8)
+
+plt.tight_layout()
+plt.savefig('plots/frequency_vs_oov.png', dpi=300, bbox_inches='tight')
+plt.show()
+
+# VISUALIZATION 9: IMPORTANCE vs IMPORTANCE_OOV comparison
+plt.figure(figsize=(14, 8))
+
+# Set up the bar positions
+x = np.arange(len(test_df))
+width = 0.2
+
+# Create the bars for IMPORTANCE and IMPORTANCE_OOV
+plt.bar(x - width/2, test_df['IMPORTANCE'], width, label='IMPORTANCE', color=method_colors['IMPORTANCE'], alpha=0.7)
+plt.bar(x + width/2, test_df['IMPORTANCE_OOV'], width, label='IMPORTANCE_OOV', color=method_colors['IMPORTANCE_OOV'], alpha=0.7)
+
+# Add labels and title
+plt.xlabel('Dataset', fontsize=12)
+plt.ylabel('Performance', fontsize=12)
+plt.title('Regular vs OOV Importance Pruning Performance', fontsize=14)
+plt.xticks(x, test_df.index, rotation=45, fontsize=10)
+plt.legend(fontsize=10)
+plt.grid(axis='y', linestyle='--', alpha=0.3)
+
+# Add value labels
+for i in range(len(test_df)):
+    plt.text(i - width/2, test_df['IMPORTANCE'].iloc[i] + 0.01, 
+             f'{test_df["IMPORTANCE"].iloc[i]:.3f}', ha='center', va='bottom', fontsize=8)
+    plt.text(i + width/2, test_df['IMPORTANCE_OOV'].iloc[i] + 0.01, 
+             f'{test_df["IMPORTANCE_OOV"].iloc[i]:.3f}', ha='center', va='bottom', fontsize=8)
+
+plt.tight_layout()
+plt.savefig('plots/importance_vs_oov.png', dpi=300, bbox_inches='tight')
 plt.show() 

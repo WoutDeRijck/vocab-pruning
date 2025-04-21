@@ -9,7 +9,7 @@ on GLUE benchmark tasks. This approach uses attention patterns from a fine-tuned
 to determine token importance in context.
 
 Example usage:
-    python run_attention_pruning.py --task mrpc --prune_percent 20 --finetuned_model_path path/to/finetuned/model
+    python run_attention_pruning.py --task mrpc --prune_percent 20 --no_pruning_dir path/to/no_pruning_output
 """
 
 import os
@@ -21,12 +21,6 @@ import re
 import pandas as pd
 from datetime import datetime
 import glob
-
-# Add parent directory to path to import modules
-sys.path.append('..')
-
-from main import run_pipeline
-from utils import set_seed
 
 # Configure logging
 logging.basicConfig(
@@ -47,72 +41,101 @@ BATCH_SIZE = 128
 PRUNE_PERCENT = 20
 
 # Default settings for each task (customize as needed)
-# Fill in the finetuned_model field with paths to task-specific fine-tuned models
 TASK_DEFAULTS = {
     "cola": {
         "batch_size": BATCH_SIZE, 
         "learning_rate": 8e-5, 
         "epochs": 8,
         "prune_percent": PRUNE_PERCENT,
-        "finetuned_model": ""  # Path to fine-tuned model for CoLA
     },
     "mnli": {
         "batch_size": BATCH_SIZE, 
         "learning_rate": 5e-5, 
         "epochs": 1,
         "prune_percent": PRUNE_PERCENT,
-        "finetuned_model": ""  # Path to fine-tuned model for MNLI
     },
     "mrpc": {
         "batch_size": BATCH_SIZE, 
         "learning_rate": 5e-5, 
         "epochs": 15,
         "prune_percent": PRUNE_PERCENT,
-        "finetuned_model": ""  # Path to fine-tuned model for MRPC
     },
     "qnli": {
         "batch_size": BATCH_SIZE, 
         "learning_rate": 8e-5, 
         "epochs": 2,
         "prune_percent": PRUNE_PERCENT,
-        "finetuned_model": ""  # Path to fine-tuned model for QNLI
     },
     "qqp": {
         "batch_size": BATCH_SIZE, 
         "learning_rate": 5e-5, 
         "epochs": 10,
         "prune_percent": PRUNE_PERCENT,
-        "finetuned_model": ""  # Path to fine-tuned model for QQP
     },
     "rte": {
         "batch_size": BATCH_SIZE, 
         "learning_rate": 5e-5, 
         "epochs": 10,
         "prune_percent": PRUNE_PERCENT,
-        "finetuned_model": ""  # Path to fine-tuned model for RTE
     },
     "sst2": {
         "batch_size": BATCH_SIZE, 
         "learning_rate": 8e-5, 
         "epochs": 2,
         "prune_percent": PRUNE_PERCENT,
-        "finetuned_model": ""  # Path to fine-tuned model for SST-2
     },
     "stsb": {
         "batch_size": BATCH_SIZE, 
         "learning_rate": 8e-5, 
         "epochs": 10,
         "prune_percent": PRUNE_PERCENT,
-        "finetuned_model": ""  # Path to fine-tuned model for STS-B
     },
     "wnli": {
         "batch_size": BATCH_SIZE, 
         "learning_rate": 5e-5, 
         "epochs": 3,
         "prune_percent": PRUNE_PERCENT,
-        "finetuned_model": ""  # Path to fine-tuned model for WNLI
     }
 }
+
+def find_finetuned_model(no_pruning_dir, task_name):
+    """
+    Find the fine-tuned model checkpoint for a specific task in the no-pruning directory.
+    
+    Args:
+        no_pruning_dir: Directory containing no-pruning results
+        task_name: Name of the GLUE task
+        
+    Returns:
+        Path to the fine-tuned model checkpoint, or None if not found
+    """
+    # Check if task directory exists
+    task_dir = os.path.join(no_pruning_dir, task_name)
+    if not os.path.exists(task_dir):
+        logger.warning(f"No task directory found at {task_dir}")
+        return None
+    
+    # Look for model checkpoint directory - model checkpoints are directories with model files
+    checkpoint_dirs = []
+    for item in os.listdir(task_dir):
+        item_path = os.path.join(task_dir, item)
+        # Check if it's a directory that looks like a model checkpoint
+        if os.path.isdir(item_path) and any([
+            os.path.exists(os.path.join(item_path, file))
+            for file in ["config.json", "pytorch_model.bin", "model.safetensors"]
+        ]):
+            checkpoint_dirs.append(item_path)
+    
+    if not checkpoint_dirs:
+        logger.warning(f"No model checkpoint directories found in {task_dir}")
+        return None
+    
+    # Sort by creation time (newest first)
+    checkpoint_dirs.sort(key=os.path.getctime, reverse=True)
+    model_dir = checkpoint_dirs[0]
+    
+    logger.info(f"Found fine-tuned model checkpoint: {model_dir}")
+    return model_dir
 
 def parse_args():
     """Parse command line arguments for Attention-based pruning."""
@@ -141,6 +164,13 @@ def parse_args():
         type=str, 
         default=None,
         help="Path to a fine-tuned model to use for attention calculation (optional)"
+    )
+    
+    parser.add_argument(
+        "--no_pruning_dir", 
+        type=str, 
+        default=None,
+        help="Directory containing fine-tuned models from no-pruning runs"
     )
     
     # Pruning arguments
@@ -286,9 +316,6 @@ def main():
     """Main function to run Attention-based pruning on multiple tasks."""
     args = parse_args()
     
-    # Set random seed
-    set_seed(args.seed)
-    
     # Create output directory
     os.makedirs(args.output_dir, exist_ok=True)
     
@@ -310,14 +337,19 @@ def main():
         epochs = args.epochs if args.epochs is not None else TASK_DEFAULTS[task_name]["epochs"]
         prune_percent = args.prune_percent if args.prune_percent is not None else TASK_DEFAULTS[task_name]["prune_percent"]
         
-        # Use task-specific fine-tuned model if available, otherwise use command line argument
+        # Determine fine-tuned model to use
         finetuned_model = args.finetuned_model_path
-        if not finetuned_model and TASK_DEFAULTS[task_name]["finetuned_model"]:
-            finetuned_model = TASK_DEFAULTS[task_name]["finetuned_model"]
+        
+        # If no explicit fine-tuned model path is provided, try to find one from no_pruning_dir
+        if not finetuned_model and args.no_pruning_dir:
+            finetuned_model = find_finetuned_model(args.no_pruning_dir, task_name)
+            if not finetuned_model:
+                logger.warning(f"No fine-tuned model found for task {task_name} in {args.no_pruning_dir}")
+                logger.info(f"Falling back to base model: {args.model_name}")
         
         # Determine which model to use for embeddings and attention calculation
-        model_name = finetuned_model if finetuned_model else args.model_name
-        attention_model = finetuned_model  # Always use the same model for attention
+        model_name = args.model_name
+        attention_model = finetuned_model if finetuned_model else args.model_name
         
         # Create task-specific output directory
         task_output_dir = os.path.join(args.output_dir, task_name)
@@ -328,7 +360,9 @@ def main():
         logger.info(f"Parameters: batch_size={batch_size}, learning_rate={learning_rate}, "
                   f"epochs={epochs}, prune_percent={prune_percent}")
         if finetuned_model:
-            logger.info(f"Using fine-tuned model: {finetuned_model}")
+            logger.info(f"Using fine-tuned model for attention calculation: {finetuned_model}")
+        else:
+            logger.info(f"Using base model for attention calculation: {model_name}")
         
         # Build command for the main script
         cmd = [
@@ -341,10 +375,13 @@ def main():
             "--learning_rate", str(learning_rate),
             "--batch_size", str(batch_size),
             "--weight_decay", str(args.weight_decay),
-            "--attention_model", attention_model,
             "--output_dir", task_output_dir,
             "--seed", str(args.seed),
         ]
+        
+        # Add attention model if specified
+        if attention_model:
+            cmd.extend(["--attention_model", attention_model])
         
         # Run the command
         logger.info(f"Running command: {' '.join(cmd)}")
