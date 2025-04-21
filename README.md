@@ -247,3 +247,42 @@ For issues with word importance methods, ensure nltk is installed:
 pip install nltk
 python -c "import nltk; nltk.download('stopwords')"
 ```
+
+## Visualization and Results
+
+The repository includes a visualization script that generates plots comparing all pruning methods:
+
+```bash
+python visualize_results.py
+```
+
+This script produces several visualizations:
+
+1. **Performance Comparison**: Bar charts comparing test performance across all methods
+2. **Performance Drop**: Charts showing the performance drop from the baseline for each method
+3. **Parameter Reduction**: Bar charts showing total, embedding, and vocabulary parameter reduction
+4. **Dataset Size Impact**: Scatter plots showing the relationship between dataset size and performance
+5. **Method-specific Comparisons**: Direct comparisons between regular and OOV variants of methods
+6. **Performance vs. Parameter Reduction**: Scatter plots showing the tradeoff between performance and model size
+
+Results are summarized in three CSV files:
+
+1. **SUMMARY.csv**: Raw performance metrics for all methods (train and test)
+2. **SUMMARY_WITH_SIZES.csv**: Performance metrics and relative drop for each method, organized by dataset size
+3. **PARAM_REDUCTION_SUMMARY.csv**: Parameter reduction percentages (total, embedding, vocabulary) across methods
+
+These files and visualizations make it easy to compare:
+- Performance across different pruning techniques
+- Tradeoffs between model size and accuracy
+- Method effectiveness based on dataset properties
+
+Each visualization includes all implemented pruning methods:
+- NO PRUNING (baseline)
+- TRAIN TOKENS ONLY
+- RANDOM
+- CLUSTERING
+- FREQUENCY
+- ATTENTION
+- IMPORTANCE
+- FREQUENCY_OOV
+- IMPORTANCE_OOV

@@ -36,6 +36,7 @@ train_tokens_test = []
 random_test = []
 clustering_test = []
 frequency_test = []
+attention_test = []
 importance_test = []
 frequency_oov_test = []
 importance_oov_test = []
@@ -46,6 +47,7 @@ train_tokens_train = []
 random_train = []
 clustering_train = []
 frequency_train = []
+attention_train = []
 importance_train = []
 
 with open('results/SUMMARY.csv', 'r') as f:
@@ -73,7 +75,11 @@ with open('results/SUMMARY.csv', 'r') as f:
             else:
                 frequency_train.append(0.0)
             if len(row) > 12:
-                importance_train.append(parse_value(row[12]))
+                attention_train.append(parse_value(row[12]))
+            else:
+                attention_train.append(0.0)
+            if len(row) > 14:
+                importance_train.append(parse_value(row[14]))
             else:
                 importance_train.append(0.0)
             
@@ -90,15 +96,19 @@ with open('results/SUMMARY.csv', 'r') as f:
             else:
                 frequency_test.append(0.0)
             if len(row) > 13:
-                importance_test.append(parse_value(row[13]))
+                attention_test.append(parse_value(row[13]))
+            else:
+                attention_test.append(0.0)
+            if len(row) > 15:
+                importance_test.append(parse_value(row[15]))
             else:
                 importance_test.append(0.0)
-            if len(row) > 14:
-                frequency_oov_test.append(parse_value(row[14]))
+            if len(row) > 16:
+                frequency_oov_test.append(parse_value(row[16]))
             else:
                 frequency_oov_test.append(0.0)
-            if len(row) > 15:
-                importance_oov_test.append(parse_value(row[15]))
+            if len(row) > 17:
+                importance_oov_test.append(parse_value(row[17]))
             else:
                 importance_oov_test.append(0.0)
 
@@ -110,6 +120,7 @@ test_df = pd.DataFrame({
     'RANDOM': random_test,
     'CLUSTERING': clustering_test,
     'FREQUENCY': frequency_test,
+    'ATTENTION': attention_test,
     'IMPORTANCE': importance_test,
     'FREQUENCY_OOV': frequency_oov_test,
     'IMPORTANCE_OOV': importance_oov_test,
@@ -122,6 +133,7 @@ train_df = pd.DataFrame({
     'RANDOM': random_train,
     'CLUSTERING': clustering_train,
     'FREQUENCY': frequency_train,
+    'ATTENTION': attention_train,
     'IMPORTANCE': importance_train,
     'SIZE': [dataset_sizes.get(dataset, 'N/A') for dataset in datasets]  # Add dataset sizes
 }, index=datasets)
@@ -131,8 +143,8 @@ print("Test Results DataFrame with dataset sizes:")
 print(test_df)
 
 # Define the list of methods for consistent reference
-methods = ['NO PRUNING', 'TRAIN TOKENS ONLY', 'RANDOM', 'CLUSTERING', 'FREQUENCY', 'IMPORTANCE', 'FREQUENCY_OOV', 'IMPORTANCE_OOV']
-colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b', '#e377c2', '#7f7f7f']
+methods = ['NO PRUNING', 'TRAIN TOKENS ONLY', 'RANDOM', 'CLUSTERING', 'FREQUENCY', 'ATTENTION', 'IMPORTANCE', 'FREQUENCY_OOV', 'IMPORTANCE_OOV']
+colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8a2be2', '#8c564b', '#e377c2', '#7f7f7f']
 method_colors = dict(zip(methods, colors))
 
 # Calculate and print performance drop from baseline
@@ -363,7 +375,7 @@ for col in param_reduction_df.columns:
     param_reduction_df[col] = pd.to_numeric(param_reduction_df[col], errors='coerce')
 
 # Convert column headers to MultiIndex
-method_groups = ['NO PRUNING', 'TRAIN TOKENS ONLY', 'RANDOM', 'CLUSTERING', 'FREQUENCY', 'IMPORTANCE', 'FREQUENCY_OOV', 'IMPORTANCE_OOV']
+method_groups = ['NO PRUNING', 'TRAIN TOKENS ONLY', 'RANDOM', 'CLUSTERING', 'FREQUENCY', 'ATTENTION', 'IMPORTANCE', 'FREQUENCY_OOV', 'IMPORTANCE_OOV']
 subtypes = ['Total', 'Embedding', 'Vocab']
 tuples = []
 

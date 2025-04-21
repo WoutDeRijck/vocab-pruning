@@ -17,6 +17,7 @@ Compares the test performance of different pruning methods across all GLUE datas
 - RANDOM
 - CLUSTERING
 - FREQUENCY
+- ATTENTION
 - IMPORTANCE
 - FREQUENCY_OOV
 - IMPORTANCE_OOV
@@ -65,7 +66,7 @@ Compares the performance of regular IMPORTANCE pruning against IMPORTANCE_OOV pr
 ### `dataset_size_vs_performance_enhanced.png`
 Shows the relationship between dataset size and model performance for different pruning methods, including trend lines and correlation coefficients.
 
-**Note**: This plot should include all pruning techniques (NO PRUNING, TRAIN TOKENS ONLY, RANDOM, CLUSTERING, FREQUENCY, IMPORTANCE, FREQUENCY_OOV, IMPORTANCE_OOV).
+**Note**: This plot includes all pruning techniques (NO PRUNING, TRAIN TOKENS ONLY, RANDOM, CLUSTERING, FREQUENCY, ATTENTION, IMPORTANCE, FREQUENCY_OOV, IMPORTANCE_OOV).
 
 ![Dataset size vs performance](dataset_size_vs_performance_enhanced.png)
 
@@ -92,6 +93,11 @@ Performance drop vs. parameter reduction for CLUSTERING pruning.
 Performance drop vs. parameter reduction for FREQUENCY pruning.
 
 ![Performance vs parameter reduction for frequency](perf_vs_param_frequency.png)
+
+### `perf_vs_param_attention.png`
+Performance drop vs. parameter reduction for ATTENTION pruning.
+
+![Performance vs parameter reduction for attention](perf_vs_param_attention.png)
 
 ### `perf_vs_param_frequency_oov.png`
 Performance drop vs. parameter reduction for FREQUENCY_OOV pruning.
