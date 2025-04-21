@@ -1,0 +1,254 @@
+% !TEX root = main.tex
+\documentclass[twocolumn]{article}
+\usepackage[a4paper,margin=1in]{geometry} 
+\usepackage{lmodern}
+\usepackage{setspace}
+\usepackage{mathptmx}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\usepackage{amsmath}
+\usepackage{booktabs}
+\usepackage{float}
+
+\title{\huge \textbf{Words That Matter:\\ Vocabulary Pruning in ModernBERT}}
+\author{Wout De Rijck, Dr. Ir. Karel D'Oosterlinck, \\ Prof. Dr. Ir. Thomas Demeester, Prof. Dr. Ir. Chris Develder}
+\date{} % No date
+
+\begin{document}
+\maketitle
+
+% Motivation / Context (1–2 sentences):
+% Start with the why. What's the broader problem or challenge? Why is this area important right now (e.g., limitations of current LLMs, safety, interpretability, efficiency)?
+
+% Gap / Problem Statement:
+% What specific problem or limitation does your paper address? This sets the stage for your contribution. It should hint at a shortcoming in current approaches without being overly critical.
+
+% Your Approach / Contribution:
+% What did you do? This is the heart of the abstract. It could be:
+
+% a new method or model
+
+% a novel dataset or benchmark
+
+% a unique analysis or framework
+
+% an improvement on performance, interpretability, etc.
+
+\begin{abstract}
+Large language models like ModernBERT face deployment challenges due to their computational demands and memory footprint, limiting their use in resource-constrained environments. While various pruning techniques exist, most require resource-intensive fine-tuning, creating a bottleneck for efficient model adaptation. We introduce a novel vocabulary pruning approach for ModernBERT that requires no additional fine-tuning, delivering superior efficiency particularly at smaller pruning ratios. Our technique specifically targets the embedding layer, which constitutes approximately 25\% of the model's parameters, through a systematic token importance analysis. We demonstrate that combining our vocabulary pruning method with LoSparse techniques for encoder layers achieves comprehensive model compression with minimal performance degradation. Experimental results show our approach reduces model size by up to X\% while maintaining Y\% of the original performance across standard benchmarks. This work establishes a practical pathway for creating lightweight, task-specific transformer models without the computational burden of traditional pruning methods.
+\end{abstract}
+
+% Key Results:
+% Give a quick summary of your main findings or improvements—include metrics or comparisons if possible, but keep it digestible.
+
+% Implications / Why It Matters:
+% What's the takeaway? How might this move the field forward, or be used by other researchers or practitioners?
+
+% Tone and Tease:
+% While all of the above should be there, the language should still invite curiosity. Think clear, precise, but also hook-y—like:
+% "We show that…", "Surprisingly, we find…", "This reveals a new direction for…"
+
+\section{Introduction}
+% Look at the introduction of ModernBERT paper, interesting!
+1. Introduction of the ModernBERT paper. \\
+2. Architecture of ModernBERT.
+
+\section{Related work}
+Model compression techniques enhance the efficiency of large language models (LLMs) by reducing their size and computational requirements. Most modern LLM compression approaches operate under post-training settings, eliminating the need for resource-intensive retraining. Model compression strategies for LLMs can be categorized into four primary methods:
+
+\begin{enumerate}
+    \item Quantization: Reduces the numerical precision of model weights, decreasing memory footprint while maintaining reasonable performance.
+    
+    \item Parameter pruning: Eliminates redundant or less important connections and neurons to create sparser models with fewer parameters.
+    
+    \item Low-rank approximation: Decomposes weight matrices into lower-dimensional representations that capture essential information while requiring fewer parameters.
+    
+    \item Knowledge distillation: Transfers knowledge from larger teacher models to smaller student models, enabling competitive performance with reduced architecture size.
+\end{enumerate}
+
+These approaches are complementary and can be combined to achieve optimal compression from different perspectives. 
+This work focuses on pruning techniques to reduce model size while preserving performance.
+For ModernBERT, an encoder-only model, this research examines specific pruning methods for encoder layers and separate techniques for the embedding matrix.
+
+\subsection{Encoder Layer Pruning}
+
+\subsubsection{LoSparse}
+Low-Rank and Sparse approximation (LoSparse) introduces a model compression strategy that decomposes each weight matrix W as the sum of a low-rank component (UV) and a sparse component (S). The low-rank part, computed via singular value decomposition, extracts the shared, coherent features among neurons, while the sparse part targets and removes redundant, incoherent features. This dual approach overcomes the limitations of traditional methods by avoiding the excessive pruning of expressive neurons and preserving diversity in the representation. Extensive experiments on natural language understanding, question answering, and generation tasks show that LoSparse achieves significant parameter reduction all while maintaining competitive performance levels.
+
+\subsubsection{Other encoder layer pruning techniques}
+
+\subsection{Vocabulary Pruning}
+While encoder layer pruning techniques like LoSparse have shown promising results, the embedding layer presents a unique challenge in transformer models. Accounting for approximately 25\% of the total parameters, the vocabulary embedding layer offers a substantial opportunity for model compression. However, unlike encoder layer pruning, vocabulary reduction requires careful consideration of semantic relationships and token importance to maintain model performance.
+
+\subsubsection{Direction is what you need}
+% Direction is what you need: Improving Word Embedding Compression in Large Language Models
+\subsubsection{TF-IDF}
+% Enhancing performance of transformer-based models in natural language understanding through word importance embedding
+
+\subsubsection{PEMA}
+% Vocabulary-level Memory Efficiency for Language Model Fine-tuning
+Partial Embedding Matrix Approximation (PEMA) makes finetuning efficient by removing the tokens in the embedding layers that are not used in the current task.
+
+\subsubsection{LightToken}
+LightToken is a lightweight token embedding framework that produces compressed token embeddings in a task and model-agnostic fashion. It's designed to be compatible with different architectures and applicable to any downstream task. The framework integrates low-rank approximation, a novel residual binary autoencoder, and a new compression loss function to significantly improve model compression ratio without sacrificing performance.
+
+\newpage
+TODO
+
+
+\newpage
+\section{Method}
+
+The proposed hybrid vocabulary pruning method for ModernBERT targets the embedding layer, which constitutes approximately 25\% of the model's parameters. This approach is based on the observation that tokens in a vocabulary have varying importance for downstream tasks, and that removed tokens can be mapped to semantically similar ones instead of a single unknown token. The method consists of three main components: token importance analysis, selective pruning, and semantic clustering for out-of-vocabulary (OOV) tokens.
+
+\subsection{Token Importance Analysis}
+Multiple approaches for token importance estimation were systematically evaluated:
+
+\begin{enumerate}
+    \item \textbf{Random Selection}: Tokens are pruned randomly without consideration for importance, serving as a baseline approach.
+    
+    \item \textbf{Frequency-Based}: Tokens are ranked by their frequency in the target dataset, with least frequently used tokens pruned first. This approach assumes that rarely used tokens contribute less to model performance.
+    
+    \item \textbf{Clustering-Based}: This approach employs agglomerative or k-means clustering on the embedding space to group tokens with similar semantic properties. For each cluster, the token closest to the centroid is retained as a representative, while others are pruned. This preserves semantic diversity across the vocabulary while reducing redundancy.
+    
+    \item \textbf{Attention-Based}: A more sophisticated approach using a finetuned model to extract attention scores across the dataset. For each token, attention patterns across all layers are aggregated to determine its contextual importance.
+    
+    \item \textbf{TF-IDF Based}: Tokens are ranked using Term Frequency-Inverse Document Frequency scores, which balance token occurrence frequency with discriminative power across documents.
+\end{enumerate}
+
+The TF-IDF approach demonstrated superior performance and was adopted as the primary method. For this approach, three normalization variants were tested:
+\begin{itemize}
+    \item Non-normalized TF-IDF (prioritizing rare but task-specific tokens)
+    \item L1-normalized TF-IDF (balancing frequency and importance)
+    \item L2-normalized TF-IDF (standard approach, providing optimal results)
+\end{itemize}
+
+The TF-IDF method effectively identifies task-relevant tokens by assigning higher importance to tokens that frequently appear in specific documents but are less common across the entire corpus. This enables selective vocabulary pruning while preserving tokens critical for maintaining task performance.
+
+\subsection{Hybrid Pruning Method}
+The hybrid approach combines importance-based token pruning with semantic clustering for OOV token handling. The method is formalized in Algorithm~\ref{alg:hybrid_pruning}.
+
+\begin{algorithm}[H]
+\caption{Hybrid Vocabulary Pruning}
+\label{alg:hybrid_pruning}
+\begin{algorithmic}[1]
+\scriptsize
+\Require Model $M$ with vocab $V$, dataset $D$, pruning \% $p$, clusters $k$, method $method$
+\Ensure Pruned model $M'$ with reduced vocabulary
+
+\State // Stage 1: Calculate token importance using selected method (random, frequency, attention, or TF-IDF)
+\State $importance \gets \text{CalculateTokenImportance}(V, D, M, method)$
+
+\State // Stage 2: Prune lowest-importance tokens based on pruning percentage
+\State $tokens\_sorted \gets \text{SortByImportance}(V, importance)$
+\State $keep\_count \gets |V| \times (1 - p/100)$
+\State $tokens\_to\_keep \gets tokens\_sorted[1:keep\_count]$
+\State $tokens\_to\_remove \gets V \setminus tokens\_to\_keep$
+
+\State // Stage 3: Cluster removed tokens and identify representatives for OOV mapping
+\State $embeddings \gets M.embedding\_layer.weight$
+\State $removed\_embeddings \gets embeddings[tokens\_to\_remove]$
+\State $kmeans \gets \text{KMeans}(n\_clusters=k)$
+\State $clusters \gets kmeans.fit\_predict(removed\_embeddings)$
+\State $oov\_map \gets \{\}$; $centers \gets \{\}$ 
+
+\For{each cluster $c$ in $range(k)$}
+    \State $indices \gets \{i : clusters[i] = c\}$
+    \If{$indices$ is not empty}
+        \State $centroid \gets kmeans.cluster\_centers_[c]$
+        \State $distances \gets \{\|removed\_embeddings[i] - centroid\| : i \in indices\}$
+        \State $closest\_idx \gets \arg\min(distances)$ 
+        \State $center\_token \gets tokens\_to\_remove[indices[closest\_idx]]$
+        \State $centers.add(center\_token)$
+        \For{$idx \in indices$} 
+            \State $oov\_map[tokens\_to\_remove[idx]] \gets center\_token$ 
+        \EndFor
+    \EndIf
+\EndFor
+
+\State // Stage 4: Create reduced embedding matrix with kept tokens and cluster representatives
+\State $all\_tokens \gets tokens\_to\_keep \cup centers$
+\State $token\_map \gets \{old: new \mid new, old \in enumerate(all\_tokens)\}$
+\State $reduced\_embeddings \gets embeddings[all\_tokens]$
+\State $M'.embedding\_layer.weight \gets reduced\_embeddings$
+
+\State \Return $M'$, $token\_map$, $oov\_map$
+\end{algorithmic}
+\end{algorithm}
+
+\subsection{Out-of-Vocabulary Token Handling}
+A key contribution of this approach is the handling of out-of-vocabulary (OOV) tokens. Rather than mapping all pruned tokens to a single UNK token, the semantic properties of the embedding space are utilized to create meaningful representations for OOV tokens.
+
+The clustering process organizes removed tokens into semantic groups, with each group represented by the token closest to the cluster centroid. When the model encounters an OOV token during inference, it maps to the appropriate cluster representative, preserving semantic properties. This approach retains more information than traditional UNK token methods.
+
+\subsection{Implementation Details}
+The implementation requires no additional fine-tuning after vocabulary pruning, improving efficiency compared to approaches that require retraining. The method comprises three technical components:
+
+\begin{enumerate}
+    \item A token extraction and importance calculation module interfacing with downstream task datasets
+    \item An embedding space K-means clustering algorithm creating semantic maps for OOV tokens
+    \item A hybrid data collator handling tokenization and OOV mappings during model inference
+\end{enumerate}
+
+Four pruning mechanisms are supported:
+\begin{itemize}
+    \item Frequency-based pruning (retaining most frequent tokens)
+    \item Importance-based pruning using non-normalized TF-IDF
+    \item Importance-based pruning using L1-normalized TF-IDF 
+    \item Importance-based pruning using L2-normalized TF-IDF (default)
+\end{itemize}
+
+Experimental results indicate that TF-IDF variants generally outperform pure frequency-based approaches, with L2-normalized TF-IDF providing the optimal balance between task-specific vocabulary retention and general language understanding.
+
+
+\newpage
+\section{Experiments}
+
+\begin{table*}[ht!]
+\centering
+\small
+\caption{Comparison of vocabulary pruning techniques on GLUE benchmark tasks. Results show accuracy on the development set with varying pruning methods. Best results for each task are highlighted in \textbf{bold}.}
+\label{tab:results}
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{lccccccccc|c}
+\toprule
+\textbf{Method} & \textbf{Param. Red.} & \textbf{SST-2} & \textbf{MRPC} & \textbf{MNLI} & \textbf{CoLA} & \textbf{STS-B} & \textbf{QQP} & \textbf{QNLI} & \textbf{RTE} & \textbf{AVG} \\
+\midrule
+\multicolumn{11}{l}{\textit{Baseline}} \\
+ModernBERT (Full) & 0.03\% & 0.951 & 0.856 & 0.881 & 0.586 & 0.917 & 0.917 & 0.916 & 0.598 & 0.828 \\
+\midrule
+\multicolumn{11}{l}{\textit{Vocabulary Pruning}} \\
+Train Tokens Only & 6.7-22.6\% & 0.950 & 0.831 & \textbf{0.883} & 0.509 & \textbf{0.917} & \textbf{0.917} & 0.915 & 0.598 & 0.815 \\
+\midrule
+Random Selection & 9.0-23.3\% & 0.911 & 0.798 & 0.832 & 0.470 & 0.845 & 0.902 & 0.895 & 0.522 & 0.772 \\
+Clustering-Based & 9.0-23.3\% & 0.899 & 0.714 & 0.712 & 0.000 & 0.786 & 0.875 & 0.836 & 0.510 & 0.667 \\
+Frequency-Based & 9.0-23.3\% & 0.943 & 0.812 & 0.880 & 0.467 & 0.905 & 0.916 & \textbf{0.920} & 0.542 & 0.798 \\
+TF-IDF Based & 9.0-23.3\% & 0.933 & 0.807 & 0.875 & 0.520 & 0.901 & 0.900 & 0.917 & \textbf{0.606} & \textbf{0.807} \\
+\midrule
+\multicolumn{11}{l}{\textit{Vocabulary Pruning with OOV Handling}} \\
+Freq + OOV & 9.0-23.2\% & \textbf{0.938} & 0.828 & \textbf{0.881} & 0.540 & 0.906 & 0.916 & 0.918 & 0.538 & 0.808 \\
+TF-IDF + OOV & 9.0-23.2\% & 0.923 & \textbf{0.834} & 0.878 & \textbf{0.615} & 0.903 & 0.906 & 0.919 & 0.554 & \textbf{0.817} \\
+\bottomrule
+\end{tabular}
+\end{table*}
+
+\begin{table}[ht!]
+\centering
+\caption{Average performance change across GLUE tasks with different pruning methods.}
+\label{tab:avg_performance}
+\begin{tabular}{lcc}
+\toprule
+\textbf{Method} & \textbf{Avg. Param. Reduction} & \textbf{Avg. Performance Drop} \\
+\midrule
+Train Tokens Only & 14.22\% & 1.25\% \\
+Random Selection & 16.44\% & 5.58\% \\
+Clustering-Based & 16.44\% & 16.24\% \\
+Frequency-Based & 16.44\% & 2.32\% \\
+TF-IDF Based & 16.44\% & 2.04\% \\
+Frequency + OOV & 16.40\% & 1.82\% \\
+TF-IDF + OOV & 16.40\% & 0.96\% \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\end{document}

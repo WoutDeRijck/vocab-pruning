@@ -33,3 +33,12 @@ pip-delete-this-directory.txt
 
 *checkpoint*
 runs/
+
+# Latex
+*.aux
+*.fdb_latexmk
+*.fls
+*.log
+*.out
+*.synctex.gz
+*.toc
