@@ -7,6 +7,7 @@ Random Vocabulary Pruning Script
 This script runs random vocabulary pruning on all GLUE benchmark tasks.
 Each task has customized hyperparameters for optimal performance.
 This serves as a baseline for comparison with other pruning methods.
+Supports both token-based and parameter-based pruning approaches.
 """
 
 import argparse
@@ -136,6 +137,12 @@ def parse_args():
     )
     
     parser.add_argument(
+        "--param_based", 
+        action="store_true",
+        help="If set, prune based on parameter percentage rather than token percentage"
+    )
+    
+    parser.add_argument(
         "--epochs", 
         type=int, 
         default=None,
@@ -227,8 +234,14 @@ def main():
     # Create output directory
     os.makedirs(args.output_dir, exist_ok=True)
     
+    # Create a subdirectory based on pruning type
+    pruning_type = "param_based" if args.param_based else "token_based"
+    pruning_dir = os.path.join(args.output_dir, pruning_type)
+    os.makedirs(pruning_dir, exist_ok=True)
+    
     # Log arguments
     logger.info(f"Running with arguments: {args}")
+    logger.info(f"Pruning type: {'Parameter-based' if args.param_based else 'Token-based'}")
     
     # Dictionary to store results for each task
     all_results = {}
@@ -255,7 +268,7 @@ def main():
             task_params["weight_decay"] = args.weight_decay
         
         # Create task-specific output directory
-        task_output_dir = os.path.join(args.output_dir, task)
+        task_output_dir = os.path.join(pruning_dir, task)
         os.makedirs(task_output_dir, exist_ok=True)
         
         # Log task parameters
@@ -279,6 +292,10 @@ def main():
             "--seed", str(args.seed),
         ]
         
+        # Add param_based flag if needed
+        if args.param_based:
+            cmd.append("--param_based")
+        
         # Run the command
         logger.info(f"Running command: {' '.join(cmd)}")
         try:
@@ -286,9 +303,10 @@ def main():
             logger.info(f"Successfully completed random pruning for task: {task}")
             
             # Find the log file for this task
+            suffix = "param" if args.param_based else "token"
             log_file = os.path.join(
                 task_output_dir, 
-                f"{task}_random_prune{int(task_params['prune_percent'])}.log"
+                f"{task}_random_{suffix}_prune{int(task_params['prune_percent'])}.log"
             )
             # Try alternative filename if not found
             if not os.path.exists(log_file):
@@ -298,7 +316,7 @@ def main():
                 )
             # Try a pattern-based search as a fallback
             if not os.path.exists(log_file):
-                pattern = f"{task}_random_prune*.log"
+                pattern = f"{task}_random*prune*.log"
                 matching_files = glob.glob(os.path.join(task_output_dir, pattern))
                 if matching_files:
                     log_file = matching_files[0]
@@ -309,7 +327,7 @@ def main():
                 all_results[task] = task_results
             else:
                 logger.warning(f"Log file not found for task {task}")
-                pattern_path = os.path.join(task_output_dir, f"{task}_random_prune*.log")
+                pattern_path = os.path.join(task_output_dir, f"{task}_random*prune*.log")
                 logger.warning(f"Tried looking for: {pattern_path}")
                 
         except subprocess.CalledProcessError as e:
@@ -319,7 +337,7 @@ def main():
     # Create summary of results
     if all_results:
         logger.info("\n" + "=" * 80)
-        logger.info("SUMMARY OF RESULTS")
+        logger.info(f"SUMMARY OF RESULTS - {pruning_type.upper()}")
         logger.info("=" * 80)
         
         # Create DataFrame for test results
@@ -352,7 +370,7 @@ def main():
         
         # Save summary to file
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        summary_file = os.path.join(args.output_dir, f"summary_results_{timestamp}.csv")
+        summary_file = os.path.join(pruning_dir, f"summary_results_{timestamp}.csv")
         
         # Combine all metrics
         all_metrics = {}

@@ -221,6 +221,12 @@ def parse_args():
         help="Random seed"
     )
     
+    parser.add_argument(
+        "--param_based",
+        action="store_true", 
+        help="If set, prune based on parameter percentage rather than token percentage (for random pruning method)"
+    )
+    
     return parser.parse_args()
 
 def create_results_dataframe(metrics_callback):
@@ -482,7 +488,8 @@ def run_cross_validation_pipeline(args, tokenizer):
                     args.task, 
                     args.model_name,
                     prune_percent=args.prune_percent,
-                    random_seed=args.seed
+                    random_seed=args.seed,
+                    param_based=args.param_based
                 )
             elif args.pruning_method == "attention":
                 model, token_map, oov_lookup = setup_attention_based_model(
@@ -744,11 +751,14 @@ def run_standard_pipeline(args, tokenizer):
             importance_type=args.importance_type
         )
     elif args.pruning_method == "random":
+        suffix = "param" if args.param_based else "token"
+        log_filename = f"{args.output_dir}/{args.task}_random_{suffix}_prune{args.prune_percent}.log"
         model, token_map, oov_lookup = setup_random_based_model(
             args.task, 
             args.model_name,
             prune_percent=args.prune_percent,
-            random_seed=args.seed
+            random_seed=args.seed,
+            param_based=args.param_based
         )
     elif args.pruning_method == "attention":
         model, token_map, oov_lookup = setup_attention_based_model(
@@ -895,6 +905,8 @@ def run_standard_pipeline(args, tokenizer):
         # Save results to CSV
         if not results_df.empty:
             results_file = f"{args.output_dir}/{args.task}_{args.pruning_method}_prune{args.prune_percent}_results.csv"
+            if args.pruning_method == "random" and args.param_based:
+                results_file = f"{args.output_dir}/{args.task}_{args.pruning_method}_param_prune{args.prune_percent}_results.csv"
             results_df.to_csv(results_file)
             logger.info(f"Saved training results to {results_file}")
         
@@ -918,6 +930,8 @@ def run_standard_pipeline(args, tokenizer):
         logger.info(f"Pruning method: {args.pruning_method}")
         if args.pruning_method != "no_pruning":
             logger.info(f"Prune percent: {args.prune_percent}%")
+            if args.pruning_method == "random" and args.param_based:
+                logger.info(f"Parameter-based pruning enabled")
             if args.pruning_method in ["frequency_oov", "importance_oov"]:
                 logger.info(f"Num OOV clusters: {args.num_clusters}")
             if args.pruning_method == "importance_oov":
@@ -1031,7 +1045,8 @@ def run_pipeline(args):
     elif args.pruning_method == "importance":
         log_filename = f"{args.output_dir}/{args.task}_importance_prune{args.prune_percent}_type{args.importance_type}.log"
     elif args.pruning_method == "random":
-        log_filename = f"{args.output_dir}/{args.task}_random_prune{args.prune_percent}.log"
+        suffix = "param" if args.param_based else "token"
+        log_filename = f"{args.output_dir}/{args.task}_random_{suffix}_prune{args.prune_percent}.log"
     elif args.pruning_method == "attention":
         attention_model_suffix = "_finetuned" if args.attention_model else ""
         log_filename = f"{args.output_dir}/{args.task}_attention_prune{args.prune_percent}{attention_model_suffix}.log"
