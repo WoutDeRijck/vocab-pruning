@@ -44,46 +44,52 @@ def random_based_pruning(token_counter, prune_percent, min_tokens=5, random_seed
     # Set random seed for reproducibility
     random.seed(random_seed)
     
-    # Get all token IDs
-    all_token_ids = list(token_counter.keys())
+    # Get all token IDs from the dataset (these are the train tokens)
+    train_token_ids = list(token_counter.keys())
+    logger.info(f"Dataset contains {len(train_token_ids)} unique tokens")
     
     # Always keep special tokens (first 5 tokens are usually special tokens in ModernBERT)
     special_tokens = list(range(5))
     
-    # Get non-special tokens
-    non_special_tokens = [token_id for token_id in all_token_ids if token_id not in special_tokens]
+    # Get non-special tokens from the train set
+    train_non_special_tokens = [token_id for token_id in train_token_ids if token_id not in special_tokens]
+    logger.info(f"Dataset contains {len(train_non_special_tokens)} non-special tokens")
     
     # Calculate number of tokens to keep based on pruning strategy
     if param_based and total_params is not None:
         # Calculate number of embedding parameters to remove
-        emb_params = len(all_token_ids) * embedding_dim
         params_to_remove = (prune_percent / 100) * total_params
         
         # Convert params to remove to tokens to remove
         tokens_to_remove_count = int(params_to_remove / embedding_dim)
         
-        # Calculate tokens to keep
-        num_tokens_to_keep = max(min_tokens, len(non_special_tokens) - tokens_to_remove_count)
+        # We can only remove tokens from the training set, not more
+        max_removable = len(train_non_special_tokens)
+        tokens_to_remove_count = min(tokens_to_remove_count, max_removable)
+        
+        # Calculate tokens to keep from the training set
+        num_tokens_to_keep = max(min_tokens, len(train_non_special_tokens) - tokens_to_remove_count)
         
         logger.info(f"Target parameter reduction: {params_to_remove:,} parameters")
         logger.info(f"This equals removing {tokens_to_remove_count} tokens at {embedding_dim} dimensions each")
+        logger.info(f"Will keep {num_tokens_to_keep} non-special tokens from the training set")
     else:
         # Traditional token-based pruning
-        num_prunable_tokens = len(non_special_tokens)
+        num_prunable_tokens = len(train_non_special_tokens)
         num_tokens_to_keep = max(min_tokens, int(num_prunable_tokens * (1 - prune_percent / 100)))
     
-    # Randomly select tokens to keep
-    tokens_to_keep_non_special = random.sample(non_special_tokens, num_tokens_to_keep)
+    # Randomly select tokens to keep from the training set
+    tokens_to_keep_non_special = random.sample(train_non_special_tokens, num_tokens_to_keep)
     
     # Combine special tokens and randomly selected tokens
     tokens_to_keep = special_tokens + tokens_to_keep_non_special
     
-    # Get tokens to remove
-    tokens_to_remove = [token_id for token_id in all_token_ids if token_id not in tokens_to_keep]
+    # Get tokens to remove from the training set
+    tokens_to_remove = [token_id for token_id in train_token_ids if token_id not in tokens_to_keep]
     
     # Calculate parameter reduction achieved
     param_reduction = len(tokens_to_remove) * embedding_dim
-    param_reduction_percent = 100 * (param_reduction / (len(all_token_ids) * embedding_dim))
+    param_reduction_percent = 100 * (param_reduction / (len(train_token_ids) * embedding_dim))
     
     logger.info(f"Kept {len(tokens_to_keep)} tokens, removed {len(tokens_to_remove)} tokens")
     logger.info(f"This reduces embedding parameters by {param_reduction:,} parameters ({param_reduction_percent:.2f}%)")
@@ -117,7 +123,7 @@ def setup_random_based_model(task_name, model_name, prune_percent=0, random_seed
     task_meta = get_task_metadata(task_name)
     n_labels = task_meta["n_labels"]
     
-    # Get dataset vocabulary with counts
+    # Get dataset vocabulary with counts - train-only tokens
     vocab_name = "mnli" if task_name.startswith("mnli") else task_name
     token_counter, all_token_ids = get_dataset_tokens_with_counts(vocab_name, train_only=True)
     
@@ -145,6 +151,7 @@ def setup_random_based_model(task_name, model_name, prune_percent=0, random_seed
         tokens_to_keep = sorted(list(all_token_ids))
     
     # Create reduced embeddings
+    logger.info(f"Creating reduced embeddings for task_vocab of size {len(tokens_to_keep)}")
     token_map, reduced_embeddings = create_reduced_embeddings(tokens_to_keep, model)
     
     # Replace embedding layer with reduced version
