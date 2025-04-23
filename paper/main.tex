@@ -8,6 +8,7 @@
 \usepackage{algpseudocode}
 \usepackage{amsmath}
 \usepackage{booktabs}
+\usepackage{arydshln}
 \usepackage{float}
 
 \title{\huge \textbf{Words That Matter:\\ Vocabulary Pruning in ModernBERT}}
@@ -209,26 +210,29 @@ Experimental results indicate that TF-IDF variants generally outperform pure fre
 \small
 \caption{Comparison of vocabulary pruning techniques on GLUE benchmark tasks. Results show accuracy on the development set with varying pruning methods. Best results for each task are highlighted in \textbf{bold}.}
 \label{tab:results}
-\setlength{\tabcolsep}{4pt}
-\begin{tabular}{lccccccccc|c}
+\setlength{\tabcolsep}{6pt}
+\begin{tabular}{lcccccccc|c}
 \toprule
-\textbf{Method} & \textbf{Param. Red.} & \textbf{SST-2} & \textbf{MRPC} & \textbf{MNLI} & \textbf{CoLA} & \textbf{STS-B} & \textbf{QQP} & \textbf{QNLI} & \textbf{RTE} & \textbf{AVG} \\
+\textbf{Method} & \textbf{SST-2} & \textbf{MRPC} & \textbf{MNLI} & \textbf{CoLA} & \textbf{STS-B} & \textbf{QQP} & \textbf{QNLI} & \textbf{RTE} & \textbf{AVG} \\
 \midrule
-\multicolumn{11}{l}{\textit{Baseline}} \\
-ModernBERT (Full) & 0.03\% & 0.951 & 0.856 & 0.881 & 0.586 & 0.917 & 0.917 & 0.916 & 0.598 & 0.828 \\
+\multicolumn{9}{l|}{\textit{Baseline}} \\
+ModernBERT (Full) & 0.951 & 0.856 & 0.881 & 0.586 & 0.917 & 0.917 & 0.916 & 0.598 & 0.828 \\
 \midrule
-\multicolumn{11}{l}{\textit{Vocabulary Pruning}} \\
-Train Tokens Only & 6.7-22.6\% & 0.950 & 0.831 & 0.883 & 0.509 & 0.917 & 0.917 & 0.915 & 0.598 & 0.815 \\
+\multicolumn{9}{l|}{\textit{Vocabulary Pruning}} \\
+Parameter Reduction & 18.85\% & 18.56\% & 6.74\% & 22.61\% & 18.76\% & 4.79\% & 6.42\% & 17.06\% &  \\
+Train Tokens Only & 0.950 & 0.831 & 0.883 & 0.509 & 0.917 & 0.917 & 0.915 & 0.598 & 0.815 \\
 \midrule
-Random Selection & 9.0-23.3\% & 0.911 & 0.798 & 0.832 & 0.470 & 0.845 & 0.902 & 0.895 & 0.522 & 0.772 \\
-Clustering-Based & 9.0-23.3\% & 0.899 & 0.714 & 0.712 & 0.000 & 0.786 & 0.875 & 0.836 & 0.510 & 0.667 \\
-Frequency-Based & 9.0-23.3\% & 0.943 & 0.812 & 0.880 & 0.467 & \textbf{0.905} & \textbf{0.916} & \textbf{0.920} & 0.542 & 0.798 \\
-Attention-Based & 8.8-23.1\% & \textbf{0.947} & \textbf{0.864} & 0.864 & \textbf{0.589} & 0.885 & 0.912 & 0.912 & 0.550 & 0.803 \\
-TF-IDF Based & 9.0-23.3\% & 0.933 & 0.807 & \textbf{0.875} & 0.520 & 0.901 & 0.900 & 0.917 & \textbf{0.606} & \textbf{0.807} \\
-\midrule
-\multicolumn{11}{l}{\textit{Vocabulary Pruning with OOV Handling}} \\
-Freq + OOV & 9.0-23.2\% & \textbf{0.938} & 0.828 & \textbf{0.881} & 0.540 & 0.906 & 0.916 & 0.918 & 0.538 & 0.808 \\
-TF-IDF + OOV & 9.0-23.2\% & 0.923 & 0.834 & 0.878 & 0.615 & 0.903 & 0.906 & 0.919 & 0.554 & \textbf{0.817} \\
+Parameter Reduction & 20.25\% & 20.02\% & 10.57\% & 23.27\% & 20.18\% & 9.01\% & 10.31\% & 18.83\% & \\
+Random Selection & 0.911 & 0.798 & 0.832 & 0.470 & 0.845 & 0.902 & 0.895 & 0.522 & 0.772 \\
+Clustering-Based & 0.899 & 0.714 & 0.712 & 0.000 & 0.786 & 0.875 & 0.836 & 0.510 & 0.667 \\
+Frequency-Based & 0.943 & 0.812 & 0.880 & 0.467 & \textbf{0.905} & \textbf{0.916} & \textbf{0.920} & 0.542 & 0.798 \\
+Attention-Based & \textbf{0.947} & \textbf{0.864} & 0.864 & \textbf{0.589} & 0.885 & 0.912 & 0.912 & 0.550 & 0.803 \\
+TF-IDF Based & 0.933 & 0.807 & \textbf{0.875} & 0.520 & 0.901 & 0.900 & 0.917 & \textbf{0.606} & \textbf{0.807} \\
+\\ [-8pt]
+\cdashline{1-10}
+\\[-8pt]
+Freq + OOV & \textbf{0.938} & 0.828 & \textbf{0.881} & 0.540 & 0.906 & 0.916 & 0.918 & 0.538 & 0.808 \\
+TF-IDF + OOV & 0.923 & 0.834 & 0.878 & 0.615 & 0.903 & 0.906 & 0.919 & 0.554 & \textbf{0.817} \\
 \bottomrule
 \end{tabular}
 \end{table*}
