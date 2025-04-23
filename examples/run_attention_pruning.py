@@ -41,60 +41,69 @@ BATCH_SIZE = 128
 PRUNE_PERCENT = 20
 
 # Default settings for each task (customize as needed)
-TASK_DEFAULTS = {
+TASK_PARAMS = {
     "cola": {
         "batch_size": BATCH_SIZE, 
         "learning_rate": 8e-5, 
         "epochs": 8,
         "prune_percent": PRUNE_PERCENT,
+        "weight_decay": 1e-6
     },
     "mnli": {
         "batch_size": BATCH_SIZE, 
         "learning_rate": 5e-5, 
         "epochs": 1,
         "prune_percent": PRUNE_PERCENT,
+        "weight_decay": 5e-6
     },
     "mrpc": {
         "batch_size": BATCH_SIZE, 
         "learning_rate": 5e-5, 
         "epochs": 15,
         "prune_percent": PRUNE_PERCENT,
+        "weight_decay": 5e-6
     },
     "qnli": {
         "batch_size": BATCH_SIZE, 
         "learning_rate": 8e-5, 
         "epochs": 2,
         "prune_percent": PRUNE_PERCENT,
+        "weight_decay": 5e-6
     },
     "qqp": {
         "batch_size": BATCH_SIZE, 
         "learning_rate": 5e-5, 
         "epochs": 10,
         "prune_percent": PRUNE_PERCENT,
+        "weight_decay": 5e-6
     },
     "rte": {
         "batch_size": BATCH_SIZE, 
         "learning_rate": 5e-5, 
         "epochs": 10,
         "prune_percent": PRUNE_PERCENT,
+        "weight_decay": 1e-5
     },
     "sst2": {
         "batch_size": BATCH_SIZE, 
         "learning_rate": 8e-5, 
         "epochs": 2,
         "prune_percent": PRUNE_PERCENT,
+        "weight_decay": 1e-5
     },
     "stsb": {
         "batch_size": BATCH_SIZE, 
         "learning_rate": 8e-5, 
         "epochs": 10,
         "prune_percent": PRUNE_PERCENT,
+        "weight_decay": 5e-6
     },
     "wnli": {
         "batch_size": BATCH_SIZE, 
         "learning_rate": 5e-5, 
         "epochs": 3,
         "prune_percent": PRUNE_PERCENT,
+        "weight_decay": 1e-5
     }
 }
 
@@ -148,7 +157,7 @@ def parse_args():
         "--tasks", 
         type=str, 
         nargs="+",
-        default=list(TASK_DEFAULTS.keys()),
+        default=list(TASK_PARAMS.keys()),
         help="GLUE tasks to run (default: all)"
     )
     
@@ -262,6 +271,12 @@ def parse_args():
         help="Random seed"
     )
     
+    parser.add_argument(
+        "--param_based", 
+        action="store_true",
+        help="If set, prune based on parameter percentage rather than token percentage"
+    )
+    
     return parser.parse_args()
 
 def parse_log_file(log_file):
@@ -313,96 +328,115 @@ def parse_log_file(log_file):
     return metrics
 
 def main():
-    """Main function to run Attention-based pruning on multiple tasks."""
+    """Run attention-based pruning on specified GLUE tasks."""
     args = parse_args()
     
     # Create output directory
     os.makedirs(args.output_dir, exist_ok=True)
     
+    # Create a subdirectory based on pruning type
+    pruning_type = "param_based" if args.param_based else "token_based"
+    pruning_dir = os.path.join(args.output_dir, pruning_type)
+    os.makedirs(pruning_dir, exist_ok=True)
+    
     # Log arguments
     logger.info(f"Running with arguments: {args}")
+    logger.info(f"Pruning type: {'Parameter-based' if args.param_based else 'Token-based'}")
     
     # Dictionary to store results for each task
     all_results = {}
     
-    # Process each task
-    for task_name in args.tasks:
-        logger.info(f"\n{'=' * 50}")
-        logger.info(f"Running Attention-based pruning for task: {task_name}")
-        logger.info(f"{'=' * 50}")
+    # Run each task
+    for task in args.tasks:
+        if task not in TASK_PARAMS:
+            logger.warning(f"Task {task} not found in task parameters, skipping.")
+            continue
         
-        # Apply task-specific defaults unless overridden
-        batch_size = args.batch_size if args.batch_size is not None else TASK_DEFAULTS[task_name]["batch_size"]
-        learning_rate = args.learning_rate if args.learning_rate is not None else TASK_DEFAULTS[task_name]["learning_rate"]
-        epochs = args.epochs if args.epochs is not None else TASK_DEFAULTS[task_name]["epochs"]
-        prune_percent = args.prune_percent if args.prune_percent is not None else TASK_DEFAULTS[task_name]["prune_percent"]
+        # Get task parameters
+        task_params = TASK_PARAMS[task].copy()
+        
+        # Override task parameters if specified
+        if args.prune_percent is not None:
+            task_params["prune_percent"] = args.prune_percent
+        if args.epochs is not None:
+            task_params["epochs"] = args.epochs
+        if args.learning_rate is not None:
+            task_params["learning_rate"] = args.learning_rate
+        if args.batch_size is not None:
+            task_params["batch_size"] = args.batch_size
+        if args.weight_decay is not None:
+            task_params["weight_decay"] = args.weight_decay
+        
+        # Create task-specific output directory
+        task_output_dir = os.path.join(pruning_dir, task)
+        os.makedirs(task_output_dir, exist_ok=True)
         
         # Determine fine-tuned model to use
         finetuned_model = args.finetuned_model_path
         
         # If no explicit fine-tuned model path is provided, try to find one from no_pruning_dir
         if not finetuned_model and args.no_pruning_dir:
-            finetuned_model = find_finetuned_model(args.no_pruning_dir, task_name)
+            finetuned_model = find_finetuned_model(args.no_pruning_dir, task)
             if not finetuned_model:
-                logger.warning(f"No fine-tuned model found for task {task_name} in {args.no_pruning_dir}")
+                logger.warning(f"No fine-tuned model found for task {task} in {args.no_pruning_dir}")
                 logger.info(f"Falling back to base model: {args.model_name}")
         
         # Determine which model to use for embeddings and attention calculation
         model_name = args.model_name
         attention_model = finetuned_model if finetuned_model else args.model_name
         
-        # Create task-specific output directory
-        task_output_dir = os.path.join(args.output_dir, task_name)
-        os.makedirs(task_output_dir, exist_ok=True)
-        
         # Log task parameters
-        model_suffix = "_finetuned" if finetuned_model else ""
-        logger.info(f"Parameters: batch_size={batch_size}, learning_rate={learning_rate}, "
-                  f"epochs={epochs}, prune_percent={prune_percent}")
-        if finetuned_model:
-            logger.info(f"Using fine-tuned model for attention calculation: {finetuned_model}")
-        else:
-            logger.info(f"Using base model for attention calculation: {model_name}")
+        logger.info(f"\n{'=' * 50}")
+        logger.info(f"Running attention-based pruning for task: {task}")
+        logger.info(f"Parameters: {task_params}")
+        logger.info(f"Using model: {model_name}")
+        logger.info(f"Using attention model: {attention_model}")
+        logger.info(f"{'=' * 50}")
         
         # Build command for the main script
         cmd = [
             "python", MAIN_SCRIPT_PATH,
-            "--task", task_name,
+            "--task", task,
             "--model_name", model_name,
             "--pruning_method", "attention",
-            "--prune_percent", str(prune_percent),
-            "--epochs", str(epochs),
-            "--learning_rate", str(learning_rate),
-            "--batch_size", str(batch_size),
-            "--weight_decay", str(args.weight_decay),
+            "--attention_model", attention_model if attention_model != model_name else "",
+            "--prune_percent", str(task_params["prune_percent"]),
+            "--epochs", str(task_params["epochs"]),
+            "--learning_rate", str(task_params["learning_rate"]),
+            "--batch_size", str(task_params["batch_size"]),
+            "--weight_decay", str(task_params["weight_decay"]),
             "--output_dir", task_output_dir,
             "--seed", str(args.seed),
         ]
         
-        # Add attention model if specified
-        if attention_model:
-            cmd.extend(["--attention_model", attention_model])
+        # Remove empty arguments
+        cmd = [arg for arg in cmd if arg]
+        
+        # Add param_based flag if needed
+        if args.param_based:
+            cmd.append("--param_based")
         
         # Run the command
         logger.info(f"Running command: {' '.join(cmd)}")
         try:
             subprocess.run(cmd, check=True)
-            logger.info(f"Successfully completed attention pruning for task: {task_name}")
+            logger.info(f"Successfully completed attention-based pruning for task: {task}")
             
             # Find the log file for this task
+            suffix = "param" if args.param_based else "token"
             log_file = os.path.join(
                 task_output_dir, 
-                f"{task_name}_attention_prune{int(prune_percent)}{model_suffix}.log"
+                f"{task}_attention_{suffix}_prune{int(task_params['prune_percent'])}.log"
             )
             # Try alternative filename if not found
             if not os.path.exists(log_file):
                 log_file = os.path.join(
                     task_output_dir, 
-                    f"{task_name}_attention_prune{prune_percent}{model_suffix}.log"
+                    f"{task}_attention_prune{task_params['prune_percent']}.log"
                 )
             # Try a pattern-based search as a fallback
             if not os.path.exists(log_file):
-                pattern = f"{task_name}_attention_prune*{model_suffix}.log"
+                pattern = f"{task}_attention*prune*.log"
                 matching_files = glob.glob(os.path.join(task_output_dir, pattern))
                 if matching_files:
                     log_file = matching_files[0]
@@ -410,14 +444,14 @@ def main():
             if os.path.exists(log_file):
                 # Parse results from the log file
                 task_results = parse_log_file(log_file)
-                all_results[task_name] = task_results
+                all_results[task] = task_results
             else:
-                logger.warning(f"Log file not found for task {task_name}")
-                pattern_path = os.path.join(task_output_dir, f"{task_name}_attention_prune*{model_suffix}.log")
+                logger.warning(f"Log file not found for task {task}")
+                pattern_path = os.path.join(task_output_dir, f"{task}_attention*prune*.log")
                 logger.warning(f"Tried looking for: {pattern_path}")
                 
         except subprocess.CalledProcessError as e:
-            logger.error(f"Error running attention pruning for task {task_name}: {e}")
+            logger.error(f"Error running attention-based pruning for task {task}: {e}")
             continue
     
     # Create summary of results

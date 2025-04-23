@@ -17,7 +17,8 @@ from utils import get_task_metadata
 # Configure logging
 logger = logging.getLogger(__name__)
 
-def cluster_embeddings(token_ids, model, prune_percent, clustering_method="agglomerative"):
+def cluster_embeddings(token_ids, model, prune_percent, clustering_method="agglomerative", 
+                       param_based=False, total_params=None, total_vocab_size=None, embedding_dim=768):
     """
     Cluster token embeddings and prune vocabulary based on similarity.
     Used by the clustering-based pruning method.
@@ -27,11 +28,18 @@ def cluster_embeddings(token_ids, model, prune_percent, clustering_method="agglo
         model: Model whose embeddings will be used
         prune_percent: Percentage of vocabulary to prune through clustering
         clustering_method: Method to use for clustering (agglomerative or kmeans)
+        param_based: If True, prune based on parameter percentage rather than token percentage
+        total_params: Total parameters in the model (needed for parameter-based pruning)
+        total_vocab_size: Total size of the original vocabulary
+        embedding_dim: Dimension of token embeddings (needed for parameter calculation)
         
     Returns:
         List of token IDs to keep after pruning
     """
-    logger.info(f"Clustering embeddings for {len(token_ids)} tokens with {prune_percent}% pruning using {clustering_method}")
+    if param_based:
+        logger.info(f"Clustering embeddings for parameter-based pruning ({prune_percent}% of total params) using {clustering_method}")
+    else:
+        logger.info(f"Clustering embeddings for {len(token_ids)} tokens with {prune_percent}% pruning using {clustering_method}")
     
     # Get original embedding matrix
     original_embeddings = model.model.embeddings.tok_embeddings.weight.data
@@ -46,9 +54,45 @@ def cluster_embeddings(token_ids, model, prune_percent, clustering_method="agglo
     prunable_tokens = token_ids[5:]
     prunable_embeddings = original_embeddings[prunable_tokens].cpu().numpy()
     
-    # Calculate number of clusters
-    n_clusters = len(prunable_tokens) - int(len(token_ids) * prune_percent / 100)
-    logger.info(f"Clustering into {n_clusters} clusters (reducing from {len(prunable_tokens)} tokens)")
+    # Calculate parameter reduction achieved by keeping only training tokens
+    if param_based and total_params is not None and total_vocab_size is not None:
+        # Calculate parameter reduction from keeping only train tokens
+        full_emb_params = total_vocab_size * embedding_dim
+        train_emb_params = len(token_ids) * embedding_dim
+        param_reduction_from_train_only = full_emb_params - train_emb_params
+        
+        # Calculate what percentage of total parameters this represents
+        train_only_reduction_percent = 100 * (param_reduction_from_train_only / total_params)
+        
+        logger.info(f"Full vocabulary: {total_vocab_size} tokens")
+        logger.info(f"Dataset contains {len(token_ids)} unique tokens")
+        logger.info(f"Keeping only train tokens reduces params by {param_reduction_from_train_only:,} parameters")
+        logger.info(f"This is {train_only_reduction_percent:.2f}% of total model parameters")
+        
+        # If train-only reduction already exceeds target, keep all train tokens
+        if train_only_reduction_percent >= prune_percent:
+            logger.info(f"Train-only reduction ({train_only_reduction_percent:.2f}%) already exceeds target ({prune_percent}%)")
+            logger.info("Keeping all training tokens without further pruning")
+            return token_ids
+        
+        # Otherwise, calculate how many more tokens we need to prune
+        target_param_reduction = (prune_percent / 100) * total_params
+        additional_param_reduction_needed = target_param_reduction - param_reduction_from_train_only
+        additional_tokens_to_remove = int(additional_param_reduction_needed / embedding_dim)
+        
+        # We can't remove more tokens than are available in the prunable tokens
+        additional_tokens_to_remove = min(additional_tokens_to_remove, len(prunable_tokens))
+        
+        # Calculate number of clusters needed (tokens to keep)
+        n_clusters = len(prunable_tokens) - additional_tokens_to_remove
+        
+        logger.info(f"Need additional {additional_param_reduction_needed:,} parameter reduction")
+        logger.info(f"This requires removing {additional_tokens_to_remove} more tokens")
+        logger.info(f"Clustering into {n_clusters} clusters (reducing from {len(prunable_tokens)} tokens)")
+    else:
+        # Calculate number of clusters based on token percentage
+        n_clusters = len(prunable_tokens) - int(len(token_ids) * prune_percent / 100)
+        logger.info(f"Clustering into {n_clusters} clusters (reducing from {len(prunable_tokens)} tokens)")
     
     # Normalize the embeddings for cosine similarity
     norms = np.linalg.norm(prunable_embeddings, axis=1, keepdims=True)
@@ -137,24 +181,35 @@ def cluster_embeddings(token_ids, model, prune_percent, clustering_method="agglo
     final_vocab = special_tokens + tokens_to_keep
     logger.info(f"Final vocabulary size after clustering: {len(final_vocab)} (reduced from {len(token_ids)}, {(1 - len(final_vocab)/len(token_ids))*100:.2f}% reduction)")
     
+    # Calculate parameter reduction for logging
+    if param_based and total_params and total_vocab_size:
+        token_reduction = (total_vocab_size - len(final_vocab))
+        final_param_reduction = token_reduction * embedding_dim
+        final_reduction_percent = 100 * (final_param_reduction / total_params)
+        logger.info(f"Total vocabulary reduction: {token_reduction} tokens from full vocabulary")
+        logger.info(f"This reduces parameters by {final_param_reduction:,} parameters")
+        logger.info(f"Overall parameter reduction: {final_reduction_percent:.2f}% of total model parameters")
+    
     return final_vocab
 
-def setup_clustering_based_model(task_name, model_name, prune_percent=0, clustering_method="agglomerative"):
+def setup_clustering_based_model(task_name, model_name, prune_percent=0, clustering_method="agglomerative", param_based=False):
     """
     Set up a model with reduced vocabulary based on clustering-based pruning.
     
     Args:
         task_name: Name of the GLUE task
         model_name: Base model to use
-        prune_percent: Percentage of tokens to prune through clustering
+        prune_percent: Percentage of tokens or parameters to prune through clustering
         clustering_method: Method to use for clustering
+        param_based: If True, prune based on parameter percentage rather than token percentage
         
     Returns:
         model: Model with reduced vocabulary
         token_map: Mapping from original token IDs to new IDs
         oov_lookup: None for clustering method
     """
-    logger.info(f"Setting up clustering-based model for {task_name} with {prune_percent}% pruning")
+    pruning_type = "parameter-based" if param_based else "token-based"
+    logger.info(f"Setting up {pruning_type} clustering-based model for {task_name} with {prune_percent}% pruning")
     
     # Load GLUE task metadata
     task_meta = get_task_metadata(task_name)
@@ -168,11 +223,29 @@ def setup_clustering_based_model(task_name, model_name, prune_percent=0, cluster
     from transformers import AutoModelForSequenceClassification
     model = AutoModelForSequenceClassification.from_pretrained(model_name, num_labels=n_labels)
     
+    # Get total model parameters and embedding dimension
+    total_params = sum(p.numel() for p in model.parameters())
+    embedding_dim = model.model.embeddings.tok_embeddings.embedding_dim
+    total_vocab_size = model.model.embeddings.tok_embeddings.num_embeddings
+    
+    logger.info(f"Model has {total_params:,} total parameters")
+    logger.info(f"Token embeddings: {total_vocab_size:,} tokens with dimension {embedding_dim}")
+    
     # Apply clustering-based pruning if requested
     if prune_percent > 0:
-        task_vocab = cluster_embeddings(task_vocab, model, prune_percent, clustering_method)
+        task_vocab = cluster_embeddings(
+            task_vocab, 
+            model, 
+            prune_percent, 
+            clustering_method,
+            param_based=param_based,
+            total_params=total_params,
+            total_vocab_size=total_vocab_size,
+            embedding_dim=embedding_dim
+        )
     
     # Create reduced embeddings
+    logger.info(f"Creating reduced embeddings for task_vocab of size {len(task_vocab)}")
     token_map, reduced_embeddings = create_reduced_embeddings(task_vocab, model)
     
     # Replace embedding layer with reduced version

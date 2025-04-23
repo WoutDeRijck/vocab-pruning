@@ -459,14 +459,16 @@ def run_cross_validation_pipeline(args, tokenizer):
                 model, token_map, oov_lookup = setup_frequency_based_model(
                     args.task, 
                     args.model_name,
-                    prune_percent=args.prune_percent
+                    prune_percent=args.prune_percent,
+                    param_based=args.param_based
                 )
             elif args.pruning_method == "frequency_oov":
                 model, token_map, oov_lookup = setup_frequency_oov_model(
                     args.task, 
                     args.model_name,
                     prune_percent=args.prune_percent,
-                    num_clusters=args.num_clusters
+                    num_clusters=args.num_clusters,
+                    param_based=args.param_based
                 )
             elif args.pruning_method == "importance_oov":
                 model, token_map, oov_lookup = setup_importance_oov_model(
@@ -474,14 +476,16 @@ def run_cross_validation_pipeline(args, tokenizer):
                     args.model_name,
                     prune_percent=args.prune_percent,
                     num_clusters=args.num_clusters,
-                    importance_type=args.importance_type
+                    importance_type=args.importance_type,
+                    param_based=args.param_based
                 )
             elif args.pruning_method == "importance":
                 model, token_map, oov_lookup = setup_importance_based_model(
                     args.task, 
                     args.model_name,
                     prune_percent=args.prune_percent,
-                    importance_type=args.importance_type
+                    importance_type=args.importance_type,
+                    param_based=args.param_based
                 )
             elif args.pruning_method == "random":
                 model, token_map, oov_lookup = setup_random_based_model(
@@ -496,7 +500,8 @@ def run_cross_validation_pipeline(args, tokenizer):
                     args.task, 
                     args.model_name,
                     attention_model=args.attention_model,
-                    prune_percent=args.prune_percent
+                    prune_percent=args.prune_percent,
+                    param_based=args.param_based
                 )
             elif args.pruning_method == "train_only":
                 model, token_map, oov_lookup = setup_train_only_model(
@@ -726,14 +731,16 @@ def run_standard_pipeline(args, tokenizer):
         model, token_map, oov_lookup = setup_frequency_based_model(
             args.task, 
             args.model_name,
-            prune_percent=args.prune_percent
+            prune_percent=args.prune_percent,
+            param_based=args.param_based
         )
     elif args.pruning_method == "frequency_oov":
         model, token_map, oov_lookup = setup_frequency_oov_model(
             args.task, 
             args.model_name,
             prune_percent=args.prune_percent,
-            num_clusters=args.num_clusters
+            num_clusters=args.num_clusters,
+            param_based=args.param_based
         )
     elif args.pruning_method == "importance_oov":
         model, token_map, oov_lookup = setup_importance_oov_model(
@@ -741,14 +748,16 @@ def run_standard_pipeline(args, tokenizer):
             args.model_name,
             prune_percent=args.prune_percent,
             num_clusters=args.num_clusters,
-            importance_type=args.importance_type
+            importance_type=args.importance_type,
+            param_based=args.param_based
         )
     elif args.pruning_method == "importance":
         model, token_map, oov_lookup = setup_importance_based_model(
             args.task, 
             args.model_name,
             prune_percent=args.prune_percent,
-            importance_type=args.importance_type
+            importance_type=args.importance_type,
+            param_based=args.param_based
         )
     elif args.pruning_method == "random":
         suffix = "param" if args.param_based else "token"
@@ -765,7 +774,8 @@ def run_standard_pipeline(args, tokenizer):
             args.task, 
             args.model_name,
             attention_model=args.attention_model,
-            prune_percent=args.prune_percent
+            prune_percent=args.prune_percent,
+            param_based=args.param_based
         )
     elif args.pruning_method == "train_only":
         model, token_map, oov_lookup = setup_train_only_model(
@@ -1037,19 +1047,23 @@ def run_pipeline(args):
     # Configure logging to file
     log_filename = f"{args.output_dir}/{args.task}_{args.pruning_method}_prune{args.prune_percent}.log"
     if args.pruning_method == "clustering":
-        log_filename = f"{args.output_dir}/{args.task}_clustering_prune{args.prune_percent}_{args.clustering_method}.log"
+        suffix = "param" if args.param_based else "token"
+        log_filename = f"{args.output_dir}/{args.task}_clustering_{suffix}_prune{args.prune_percent}_{args.clustering_method}.log"
     elif args.pruning_method == "frequency_oov":
-        log_filename = f"{args.output_dir}/{args.task}_frequency_oov_prune{args.prune_percent}_clusters{args.num_clusters}.log"
+        suffix = "param" if args.param_based else "token"
+        log_filename = f"{args.output_dir}/{args.task}_frequency_oov_{suffix}_prune{args.prune_percent}_clusters{args.num_clusters}.log"
     elif args.pruning_method == "importance_oov":
-        log_filename = f"{args.output_dir}/{args.task}_importance_oov_prune{args.prune_percent}_clusters{args.num_clusters}_type{args.importance_type}.log"
+        suffix = "param" if args.param_based else "token"
+        log_filename = f"{args.output_dir}/{args.task}_importance_oov_{suffix}_prune{args.prune_percent}_clusters{args.num_clusters}_type{args.importance_type}.log"
     elif args.pruning_method == "importance":
-        log_filename = f"{args.output_dir}/{args.task}_importance_prune{args.prune_percent}_type{args.importance_type}.log"
+        suffix = "param" if args.param_based else "token"
+        log_filename = f"{args.output_dir}/{args.task}_importance_{suffix}_prune{args.prune_percent}.log"
     elif args.pruning_method == "random":
         suffix = "param" if args.param_based else "token"
         log_filename = f"{args.output_dir}/{args.task}_random_{suffix}_prune{args.prune_percent}.log"
     elif args.pruning_method == "attention":
-        attention_model_suffix = "_finetuned" if args.attention_model else ""
-        log_filename = f"{args.output_dir}/{args.task}_attention_prune{args.prune_percent}{attention_model_suffix}.log"
+        suffix = "param" if args.param_based else "token"
+        log_filename = f"{args.output_dir}/{args.task}_attention_{suffix}_prune{args.prune_percent}.log"
     elif args.pruning_method == "train_only":
         log_filename = f"{args.output_dir}/{args.task}_train_only.log"
     elif args.pruning_method == "no_pruning":

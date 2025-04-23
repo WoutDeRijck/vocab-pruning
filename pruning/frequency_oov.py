@@ -18,20 +18,24 @@ from utils import get_task_metadata
 # Configure logging
 logger = logging.getLogger(__name__)
 
-def cluster_removed_tokens(tokens_to_remove, model, num_clusters=50):
+def cluster_removed_tokens(tokens_to_remove, tokens_to_keep, model, num_clusters=50):
     """
     Cluster removed tokens to create mapping for OOV tokens.
     Used by frequency_oov pruning methods.
     
     Args:
         tokens_to_remove: List of token IDs that were removed
+        tokens_to_keep: List of token IDs that are kept in the vocabulary
         model: Model whose embeddings will be used
         num_clusters: Number of clusters to create
         
     Returns:
-        oov_token_map: Mapping from removed token ID to nearest cluster center token ID
-        cluster_centers: List of token IDs representing cluster centers
+        oov_lookup: Mapping from removed token ID to nearest cluster center token ID
     """
+    if not tokens_to_remove:
+        logger.info("No tokens to cluster (all tokens kept)")
+        return {}
+        
     logger.info(f"Clustering {len(tokens_to_remove)} removed tokens into {num_clusters} clusters")
     
     # Get original embedding matrix
@@ -48,7 +52,7 @@ def cluster_removed_tokens(tokens_to_remove, model, num_clusters=50):
     cluster_labels = kmeans.fit_predict(removed_embeddings)
     
     # Initialize mapping from removed token to nearest cluster center token
-    oov_token_map = {}
+    oov_lookup = {}
     cluster_centers = []
     
     # For each cluster, find the token closest to the centroid
@@ -69,7 +73,7 @@ def cluster_removed_tokens(tokens_to_remove, model, num_clusters=50):
             
             # Map all tokens in this cluster to the center token
             for idx in cluster_indices:
-                oov_token_map[tokens_to_remove[idx]] = center_token_id
+                oov_lookup[tokens_to_remove[idx]] = center_token_id
             
             cluster_centers.append(center_token_id)
     
@@ -90,24 +94,26 @@ def cluster_removed_tokens(tokens_to_remove, model, num_clusters=50):
     
     logger.info(f"Created {len(cluster_centers)} cluster representatives for OOV token mapping")
     
-    return oov_token_map, cluster_centers
+    return oov_lookup
 
-def setup_frequency_oov_model(task_name, model_name, prune_percent=20, num_clusters=50):
+def setup_frequency_oov_model(task_name, model_name, prune_percent=20, num_clusters=50, param_based=False):
     """
     Set up a model with frequency-based OOV vocabulary pruning.
     
     Args:
         task_name: Name of the GLUE task
         model_name: Base model to use
-        prune_percent: Percentage of tokens to prune based on frequency
+        prune_percent: Percentage of tokens or parameters to prune based on frequency
         num_clusters: Number of clusters for OOV token mapping
+        param_based: If True, prune based on parameter percentage rather than token percentage
         
     Returns:
         model: Model with frequency OOV vocabulary
         token_map: Mapping from original token IDs to new IDs
         oov_lookup: Mapping from OOV token ID to cluster representative ID
     """
-    logger.info(f"Setting up frequency-OOV model for {task_name} with {prune_percent}% pruning and {num_clusters} OOV clusters")
+    pruning_type = "parameter-based" if param_based else "token-based"
+    logger.info(f"Setting up {pruning_type} frequency-OOV model for {task_name} with {prune_percent}% pruning and {num_clusters} OOV clusters")
     
     # Load GLUE task metadata
     task_meta = get_task_metadata(task_name)
@@ -120,16 +126,30 @@ def setup_frequency_oov_model(task_name, model_name, prune_percent=20, num_clust
     # Load model for embedding extraction
     model = AutoModelForSequenceClassification.from_pretrained(model_name, num_labels=n_labels)
     
+    # Get total model parameters and embedding dimension
+    total_params = sum(p.numel() for p in model.parameters())
+    embedding_dim = model.model.embeddings.tok_embeddings.embedding_dim
+    total_vocab_size = model.model.embeddings.tok_embeddings.num_embeddings
+    
+    logger.info(f"Model has {total_params:,} total parameters")
+    logger.info(f"Token embeddings: {total_vocab_size:,} tokens with dimension {embedding_dim}")
+    
     # Step 1: Frequency-based pruning
-    tokens_to_keep, tokens_to_remove = frequency_based_pruning(token_counter, prune_percent)
+    tokens_to_keep, tokens_to_remove = frequency_based_pruning(
+        token_counter,
+        prune_percent,
+        param_based=param_based,
+        embedding_dim=embedding_dim,
+        total_params=total_params,
+        total_vocab_size=total_vocab_size
+    )
     
     # Step 2: Cluster removed tokens
-    oov_token_map, cluster_centers = cluster_removed_tokens(tokens_to_remove, model, num_clusters)
+    oov_lookup = cluster_removed_tokens(tokens_to_remove, tokens_to_keep, model, num_clusters)
     
     # Step 3: Create hybrid embeddings
-    token_map, reduced_embeddings, oov_lookup = create_hybrid_embeddings(
-        tokens_to_keep, oov_token_map, cluster_centers, model
-    )
+    logger.info(f"Creating hybrid embeddings for {len(tokens_to_keep)} kept tokens and {len(oov_lookup)} OOV tokens")
+    token_map, reduced_embeddings = create_hybrid_embeddings(tokens_to_keep, oov_lookup, model)
     
     # Replace embedding layer with reduced version
     model.model.embeddings.tok_embeddings = nn.Embedding.from_pretrained(

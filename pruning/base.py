@@ -168,32 +168,27 @@ def create_reduced_embeddings(task_vocab, model):
     return token_map, reduced_embeddings
 
 # Create hybrid embeddings (used by hybrid and importance pruning)
-def create_hybrid_embeddings(tokens_to_keep, oov_token_map, cluster_centers, model):
+def create_hybrid_embeddings(tokens_to_keep, oov_lookup, model):
     """
     Create reduced embedding matrix with hybrid token mapping.
     Used by hybrid and importance-based pruning.
     
     Args:
         tokens_to_keep: List of token IDs to keep
-        oov_token_map: Mapping from removed token ID to cluster center token ID
-        cluster_centers: List of token IDs for cluster centers
+        oov_lookup: Mapping from removed token ID to cluster center token ID
         model: Model whose embeddings will be used
         
     Returns:
         token_map: Mapping from original token IDs to new consecutive IDs
         reduced_embeddings: Reduced embedding matrix
-        oov_lookup: Lookup table for mapping OOV tokens
     """
-    logger.info(f"Creating hybrid embeddings with {len(tokens_to_keep)} kept tokens and {len(cluster_centers)} OOV clusters")
+    logger.info(f"Creating hybrid embeddings with {len(tokens_to_keep)} kept tokens and {len(oov_lookup)} OOV tokens")
     
     # Get original embedding matrix
     original_embeddings = model.model.embeddings.tok_embeddings.weight.data
     
-    # Combine kept tokens and cluster centers (avoiding duplicates)
+    # Start with kept tokens
     all_tokens_to_keep = list(tokens_to_keep)
-    for center in cluster_centers:
-        if center not in all_tokens_to_keep:
-            all_tokens_to_keep.append(center)
     
     # Create mapping from original token IDs to new consecutive IDs
     token_map = {old_id: new_id for new_id, old_id in enumerate(all_tokens_to_keep)}
@@ -201,10 +196,4 @@ def create_hybrid_embeddings(tokens_to_keep, oov_token_map, cluster_centers, mod
     # Create reduced embedding matrix with only the needed vectors
     reduced_embeddings = torch.stack([original_embeddings[i] for i in all_tokens_to_keep])
     
-    # Create OOV lookup that maps original token IDs to their cluster representatives
-    oov_lookup = {}
-    for orig_id, center_id in oov_token_map.items():
-        if center_id in token_map:  # Ensure the center ID is in our vocabulary
-            oov_lookup[orig_id] = token_map[center_id]
-    
-    return token_map, reduced_embeddings, oov_lookup 
+    return token_map, reduced_embeddings 

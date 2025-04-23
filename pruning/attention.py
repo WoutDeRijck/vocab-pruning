@@ -159,100 +159,214 @@ def get_token_attention_importance(task_name, model_name):
     
     return normalized_importance, all_token_ids
 
-def attention_based_pruning(token_importance, all_token_ids, prune_percent, min_tokens=5):
+def attention_based_pruning(token_importance, all_token_ids, prune_percent, min_tokens=5,
+                         param_based=False, embedding_dim=768, total_params=None,
+                         total_vocab_size=None):
     """
     Prune vocabulary based on token attention importance scores.
     
     Args:
         token_importance: Dict with token_id -> importance score mappings
         all_token_ids: Set of all token IDs seen in the dataset
-        prune_percent: Percentage of tokens to prune
+        prune_percent: Percentage of tokens or parameters to prune
         min_tokens: Minimum number of tokens to keep
+        param_based: If True, prune based on parameter percentage rather than token percentage
+        embedding_dim: Dimension of token embeddings (needed for parameter calculation)
+        total_params: Total parameters in the model (needed for parameter-based pruning)
+        total_vocab_size: Total size of the original vocabulary
         
     Returns:
         tokens_to_keep: List of token IDs to keep
         tokens_to_remove: List of token IDs to remove
     """
-    logger.info(f"Performing attention-based pruning with prune_percent={prune_percent}%")
+    if param_based:
+        logger.info(f"Performing parameter-based attention pruning with prune_percent={prune_percent}% of total parameters")
+    else:
+        logger.info(f"Performing token-based attention pruning with prune_percent={prune_percent}%")
     
-    # Sort tokens by importance (highest first)
+    # Sort tokens by importance (highest importance first)
     sorted_tokens = sorted(
         [(token_id, token_importance[token_id]) for token_id in all_token_ids],
         key=lambda x: x[1],
         reverse=True
     )
     
+    train_token_ids = [token_id for token_id, _ in sorted_tokens]
+    logger.info(f"Dataset contains {len(train_token_ids)} unique tokens")
+    
     # Always keep special tokens (first 5 tokens are usually special tokens in ModernBERT)
     special_tokens = list(range(5))
     
-    # Calculate number of tokens to keep (excluding special tokens)
-    num_prunable_tokens = len(sorted_tokens) - len(special_tokens)
-    num_tokens_to_keep = max(min_tokens, int(num_prunable_tokens * (1 - prune_percent / 100)))
+    # Calculate parameter reduction achieved by keeping only training tokens
+    if param_based and total_params is not None and total_vocab_size is not None:
+        # Calculate parameter reduction from keeping only train tokens
+        full_emb_params = total_vocab_size * embedding_dim
+        train_emb_params = len(train_token_ids) * embedding_dim
+        param_reduction_from_train_only = full_emb_params - train_emb_params
+        
+        # Calculate what percentage of total parameters this represents
+        train_only_reduction_percent = 100 * (param_reduction_from_train_only / total_params)
+        
+        logger.info(f"Full vocabulary: {total_vocab_size} tokens")
+        logger.info(f"Keeping only train tokens reduces params by {param_reduction_from_train_only:,} parameters")
+        logger.info(f"This is {train_only_reduction_percent:.2f}% of total model parameters")
+        
+        # If train-only reduction already exceeds target, keep all train tokens
+        if train_only_reduction_percent >= prune_percent:
+            logger.info(f"Train-only reduction ({train_only_reduction_percent:.2f}%) already exceeds target ({prune_percent}%)")
+            logger.info("Keeping all training tokens without further pruning")
+            return train_token_ids, []
+        
+        # Otherwise, calculate how many more tokens we need to prune
+        target_param_reduction = (prune_percent / 100) * total_params
+        additional_param_reduction_needed = target_param_reduction - param_reduction_from_train_only
+        additional_tokens_to_remove = int(additional_param_reduction_needed / embedding_dim)
+        
+        # Get non-special tokens from the train set
+        train_non_special_tokens = [token_id for token_id in train_token_ids if token_id not in special_tokens]
+        
+        # We can't remove more tokens than are available in the non-special train set
+        additional_tokens_to_remove = min(additional_tokens_to_remove, len(train_non_special_tokens))
+        
+        logger.info(f"Need additional {additional_param_reduction_needed:,} parameter reduction")
+        logger.info(f"This requires removing {additional_tokens_to_remove} more tokens")
+        
+        # Calculate how many non-special tokens to keep
+        num_non_special_to_keep = len(train_non_special_tokens) - additional_tokens_to_remove
+        num_non_special_to_keep = max(min_tokens, num_non_special_to_keep)
+        
+        # Get tokens to keep (highest importance ones first)
+        tokens_to_keep = special_tokens.copy()
+        tokens_kept = 0
+        
+        # Add most important non-special tokens
+        for token_id, _ in sorted_tokens:
+            if token_id not in special_tokens:
+                tokens_to_keep.append(token_id)
+                tokens_kept += 1
+                if tokens_kept >= num_non_special_to_keep:
+                    break
+        
+        # Calculate tokens removed from training set
+        tokens_to_remove = [token_id for token_id in train_token_ids if token_id not in tokens_to_keep]
+        
+        # Calculate final parameter reduction
+        token_reduction = (total_vocab_size - len(tokens_to_keep))
+        final_param_reduction = token_reduction * embedding_dim
+        final_reduction_percent = 100 * (final_param_reduction / total_params)
+        
+        logger.info(f"Kept {len(tokens_to_keep)} tokens total ({len(tokens_to_keep) - len(special_tokens)} non-special)")
+        logger.info(f"Removed {len(tokens_to_remove)} tokens from training set")
+        logger.info(f"Total vocabulary reduction: {token_reduction} tokens from full vocabulary")
+        logger.info(f"This reduces parameters by {final_param_reduction:,} parameters")
+        logger.info(f"Overall parameter reduction: {final_reduction_percent:.2f}% of total model parameters")
+        
+        return tokens_to_keep, tokens_to_remove
     
-    # Get tokens to keep (most important ones)
-    tokens_to_keep = special_tokens.copy()
-    
-    # Add most important non-special tokens
-    for token_id, importance in sorted_tokens:
-        if token_id not in special_tokens:
-            tokens_to_keep.append(token_id)
-            if len(tokens_to_keep) - len(special_tokens) >= num_tokens_to_keep:
-                break
-    
-    # Get tokens to remove
-    tokens_to_remove = [token_id for token_id, _ in sorted_tokens if token_id not in tokens_to_keep]
-    
-    logger.info(f"Kept {len(tokens_to_keep)} tokens, removed {len(tokens_to_remove)} tokens")
-    
-    return tokens_to_keep, tokens_to_remove
+    else:
+        # Calculate number of tokens to keep (excluding special tokens)
+        num_prunable_tokens = len(sorted_tokens) - len(special_tokens)
+        num_tokens_to_keep = max(min_tokens, int(num_prunable_tokens * (1 - prune_percent / 100)))
+        
+        # Get tokens to keep (most important ones)
+        tokens_to_keep = special_tokens.copy()
+        
+        # Add most important non-special tokens
+        for token_id, importance in sorted_tokens:
+            if token_id not in special_tokens:
+                tokens_to_keep.append(token_id)
+                if len(tokens_to_keep) - len(special_tokens) >= num_tokens_to_keep:
+                    break
+        
+        # Get tokens to remove
+        tokens_to_remove = [token_id for token_id, _ in sorted_tokens if token_id not in tokens_to_keep]
+        
+        # Calculate parameter reduction for logging
+        param_reduction_percent = 100 * (len(tokens_to_remove) / len(train_token_ids))
+        logger.info(f"Kept {len(tokens_to_keep)} tokens, removed {len(tokens_to_remove)} tokens")
+        logger.info(f"This is a {param_reduction_percent:.2f}% reduction in token count")
+        
+        if total_params and embedding_dim:
+            param_reduction = len(tokens_to_remove) * embedding_dim
+            overall_param_reduction_percent = 100 * (param_reduction / total_params)
+            logger.info(f"Parameter reduction: {param_reduction:,} parameters")
+            logger.info(f"Overall parameter reduction: {overall_param_reduction_percent:.2f}% of total model parameters")
+        
+        return tokens_to_keep, tokens_to_remove
 
-def setup_attention_based_model(task_name, model_name, attention_model=None, prune_percent=20):
+def setup_attention_based_model(task_name, model_name, attention_model=None, prune_percent=20, param_based=False):
     """
     Set up a model with attention-based vocabulary pruning.
     
     Args:
-        task_name: Name of the GLUE task
-        model_name: Base model to use
-        attention_model: Fine-tuned model to use for attention calculation (defaults to model_name)
-        prune_percent: Percentage of tokens to prune based on attention importance
+        task_name: Name of the GLUE task to use for pruning
+        model_name: Name or path of the base model to prune
+        attention_model: Pre-trained model to use for attention calculation, defaults to model_name
+        prune_percent: Percentage of tokens or parameters to prune
+        param_based: If True, prune based on parameter percentage rather than token percentage
         
     Returns:
-        model: Model with attention-based pruned vocabulary
-        token_map: Mapping from original token IDs to new IDs
-        oov_lookup: None for attention-based method (OOV tokens mapped to UNK)
+        model: Model with pruned vocabulary
     """
-    logger.info(f"Setting up attention-based model for {task_name} with {prune_percent}% pruning")
+    if param_based:
+        logger.info(f"Setting up model with parameter-based attention pruning ({prune_percent}% of parameters)")
+    else:
+        logger.info(f"Setting up model with token-based attention pruning ({prune_percent}% of tokens)")
+    
+    # Set up the attention model
+    attention_model_name = attention_model if attention_model is not None else model_name
+    logger.info(f"Using {attention_model_name} for attention calculation")
     
     # Load GLUE task metadata
-    task_meta = get_task_metadata(task_name)
-    n_labels = task_meta["n_labels"]
+    task = get_task_metadata(task_name)
     
-    # If no attention model is specified, use the base model
-    if attention_model is None:
-        attention_model = model_name
-        logger.info(f"No specific attention model provided, using base model: {model_name}")
-    else:
-        logger.info(f"Using fine-tuned model for attention calculation: {attention_model}")
+    # Get token importance from attention and dataset tokens
+    token_importance, all_token_ids = get_token_attention_importance(task_name, attention_model_name)
     
-    # Get dataset vocabulary with token importance scores based on attention
-    vocab_name = "mnli" if task_name.startswith("mnli") else task_name
-    token_importance, all_token_ids = get_token_attention_importance(vocab_name, attention_model)
+    # Load the base model for pruning
+    model = AutoModelForSequenceClassification.from_pretrained(
+        model_name, num_labels=task.n_labels, cache_dir=None
+    )
     
-    # Print top 20 most important tokens
-    tokenizer = AutoTokenizer.from_pretrained(model_name)
-    top_tokens = sorted(token_importance.items(), key=lambda x: x[1], reverse=True)[:20]
-    logger.info("Top 20 most important tokens by attention:")
-    for token_id, importance in top_tokens:
-        token = tokenizer.convert_ids_to_tokens(token_id)
-        logger.info(f"Token: {token}, ID: {token_id}, Importance: {importance:.6f}")
+    # Get total parameters and embedding dimension for parameter-based pruning
+    total_params = sum(p.numel() for p in model.parameters())
+    embedding_dim = model.config.hidden_size
+    total_vocab_size = model.config.vocab_size
     
-    # Load model for embedding extraction
-    model = AutoModelForSequenceClassification.from_pretrained(model_name, num_labels=n_labels)
+    logger.info(f"Model has {total_params:,} total parameters")
+    logger.info(f"Embedding dimension: {embedding_dim}")
+    logger.info(f"Vocabulary size: {total_vocab_size}")
     
-    # Attention-based pruning
-    tokens_to_keep, _ = attention_based_pruning(token_importance, all_token_ids, prune_percent)
+    # Prune vocabulary based on token importance
+    tokens_to_keep, tokens_to_remove = attention_based_pruning(
+        token_importance, 
+        all_token_ids, 
+        prune_percent,
+        param_based=param_based,
+        embedding_dim=embedding_dim,
+        total_params=total_params,
+        total_vocab_size=total_vocab_size
+    )
     
+    # Create a reduced embedding layer
+    model = replace_embeddings(model, tokens_to_keep)
+    
+    return model 
+
+# Function to create reduced embeddings from tokens_to_keep
+def replace_embeddings(model, tokens_to_keep):
+    """
+    Replace the embedding layer with a reduced version containing only the specified tokens.
+    
+    Args:
+        model: The model to modify
+        tokens_to_keep: List of token IDs to keep in the reduced vocabulary
+        
+    Returns:
+        The modified model with reduced embedding layer
+    """
     # Create reduced embeddings
+    logger.info(f"Creating reduced embeddings for {len(tokens_to_keep)} tokens")
     token_map, reduced_embeddings = create_reduced_embeddings(tokens_to_keep, model)
     
     # Replace embedding layer with reduced version
@@ -260,4 +374,4 @@ def setup_attention_based_model(task_name, model_name, attention_model=None, pru
         reduced_embeddings, freeze=False
     )
     
-    return model, token_map, None  # No OOV lookup, OOV tokens mapped to UNK 
+    return model 

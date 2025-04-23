@@ -49,12 +49,13 @@ PRUNE_PERCENT = 20
 IMPORTANCE_TYPE = 3
 
 # Default settings for each task (customize as needed)
-TASK_DEFAULTS = {
+TASK_PARAMS = {
     "cola": {
         "batch_size": BATCH_SIZE, 
         "learning_rate": 8e-5, 
         "epochs": 8,
         "prune_percent": PRUNE_PERCENT,
+        "weight_decay": 1e-6,
         "importance_type": IMPORTANCE_TYPE
     },
     "mnli": {
@@ -62,6 +63,7 @@ TASK_DEFAULTS = {
         "learning_rate": 5e-5, 
         "epochs": 1,
         "prune_percent": PRUNE_PERCENT,
+        "weight_decay": 5e-6,
         "importance_type": IMPORTANCE_TYPE
     },
     "mrpc": {
@@ -69,6 +71,7 @@ TASK_DEFAULTS = {
         "learning_rate": 5e-5, 
         "epochs": 15,
         "prune_percent": PRUNE_PERCENT,
+        "weight_decay": 5e-6,
         "importance_type": IMPORTANCE_TYPE
     },
     "qnli": {
@@ -76,6 +79,7 @@ TASK_DEFAULTS = {
         "learning_rate": 8e-5, 
         "epochs": 2,
         "prune_percent": PRUNE_PERCENT,
+        "weight_decay": 5e-6,
         "importance_type": IMPORTANCE_TYPE
     },
     "qqp": {
@@ -83,6 +87,7 @@ TASK_DEFAULTS = {
         "learning_rate": 5e-5, 
         "epochs": 10,
         "prune_percent": PRUNE_PERCENT,
+        "weight_decay": 5e-6,
         "importance_type": IMPORTANCE_TYPE
     },
     "rte": {
@@ -90,6 +95,7 @@ TASK_DEFAULTS = {
         "learning_rate": 5e-5, 
         "epochs": 10,
         "prune_percent": PRUNE_PERCENT,
+        "weight_decay": 1e-5,
         "importance_type": IMPORTANCE_TYPE
     },
     "sst2": {
@@ -97,6 +103,7 @@ TASK_DEFAULTS = {
         "learning_rate": 8e-5, 
         "epochs": 2,
         "prune_percent": PRUNE_PERCENT,
+        "weight_decay": 1e-5,
         "importance_type": IMPORTANCE_TYPE
     },
     "stsb": {
@@ -104,6 +111,7 @@ TASK_DEFAULTS = {
         "learning_rate": 8e-5, 
         "epochs": 10,
         "prune_percent": PRUNE_PERCENT,
+        "weight_decay": 5e-6,
         "importance_type": IMPORTANCE_TYPE
     },
     "wnli": {
@@ -111,6 +119,7 @@ TASK_DEFAULTS = {
         "learning_rate": 5e-5, 
         "epochs": 3,
         "prune_percent": PRUNE_PERCENT,
+        "weight_decay": 1e-5,
         "importance_type": IMPORTANCE_TYPE
     }
 }
@@ -126,7 +135,7 @@ def parse_args():
         "--tasks", 
         type=str, 
         nargs="+",
-        default=list(TASK_DEFAULTS.keys()),
+        default=list(TASK_PARAMS.keys()),
         help="GLUE tasks to run (default: all)"
     )
     
@@ -234,6 +243,12 @@ def parse_args():
         help="Random seed"
     )
     
+    parser.add_argument(
+        "--param_based", 
+        action="store_true",
+        help="If set, prune based on parameter percentage rather than token percentage"
+    )
+    
     return parser.parse_args()
 
 def parse_log_file(log_file):
@@ -285,76 +300,98 @@ def parse_log_file(log_file):
     return metrics
 
 def main():
-    """Main function to run Word Importance-based pruning without OOV on multiple tasks."""
+    """Run importance-based pruning on specified GLUE tasks."""
     args = parse_args()
     
     # Create output directory
     os.makedirs(args.output_dir, exist_ok=True)
     
+    # Create a subdirectory based on pruning type
+    pruning_type = "param_based" if args.param_based else "token_based"
+    pruning_dir = os.path.join(args.output_dir, pruning_type)
+    os.makedirs(pruning_dir, exist_ok=True)
+    
     # Log arguments
     logger.info(f"Running with arguments: {args}")
+    logger.info(f"Pruning type: {'Parameter-based' if args.param_based else 'Token-based'}")
     
     # Dictionary to store results for each task
     all_results = {}
     
-    # Process each task
-    for task_name in args.tasks:
-        logger.info(f"\n{'=' * 50}")
-        logger.info(f"Running Word Importance-based pruning for task: {task_name}")
-        logger.info(f"{'=' * 50}")
+    # Run each task
+    for task in args.tasks:
+        if task not in TASK_PARAMS:
+            logger.warning(f"Task {task} not found in task parameters, skipping.")
+            continue
         
-        # Apply task-specific defaults unless overridden
-        batch_size = args.batch_size if args.batch_size is not None else TASK_DEFAULTS[task_name]["batch_size"]
-        learning_rate = args.learning_rate if args.learning_rate is not None else TASK_DEFAULTS[task_name]["learning_rate"]
-        epochs = args.epochs if args.epochs is not None else TASK_DEFAULTS[task_name]["epochs"]
-        prune_percent = args.prune_percent if args.prune_percent is not None else TASK_DEFAULTS[task_name]["prune_percent"]
-        importance_type = args.importance_type if args.importance_type is not None else TASK_DEFAULTS[task_name]["importance_type"]
+        # Get task parameters
+        task_params = TASK_PARAMS[task].copy()
+        
+        # Override task parameters if specified
+        if args.prune_percent is not None:
+            task_params["prune_percent"] = args.prune_percent
+        if args.epochs is not None:
+            task_params["epochs"] = args.epochs
+        if args.learning_rate is not None:
+            task_params["learning_rate"] = args.learning_rate
+        if args.batch_size is not None:
+            task_params["batch_size"] = args.batch_size
+        if args.weight_decay is not None:
+            task_params["weight_decay"] = args.weight_decay
+        if args.importance_type is not None:
+            task_params["importance_type"] = args.importance_type
         
         # Create task-specific output directory
-        task_output_dir = os.path.join(args.output_dir, task_name)
+        task_output_dir = os.path.join(pruning_dir, task)
         os.makedirs(task_output_dir, exist_ok=True)
         
         # Log task parameters
-        logger.info(f"Parameters: batch_size={batch_size}, learning_rate={learning_rate}, "
-                  f"epochs={epochs}, prune_percent={prune_percent}, "
-                  f"importance_type={importance_type}")
+        logger.info(f"\n{'=' * 50}")
+        logger.info(f"Running importance-based pruning for task: {task}")
+        logger.info(f"Parameters: {task_params}")
+        logger.info(f"{'=' * 50}")
         
         # Build command for the main script
         cmd = [
             "python", MAIN_SCRIPT_PATH,
-            "--task", task_name,
+            "--task", task,
             "--model_name", args.model_name,
             "--pruning_method", "importance",
-            "--prune_percent", str(prune_percent),
-            "--epochs", str(epochs),
-            "--learning_rate", str(learning_rate),
-            "--batch_size", str(batch_size),
-            "--weight_decay", str(args.weight_decay),
-            "--importance_type", str(importance_type),
+            "--importance_type", str(task_params["importance_type"]),
+            "--prune_percent", str(task_params["prune_percent"]),
+            "--epochs", str(task_params["epochs"]),
+            "--learning_rate", str(task_params["learning_rate"]),
+            "--batch_size", str(task_params["batch_size"]),
+            "--weight_decay", str(task_params["weight_decay"]),
             "--output_dir", task_output_dir,
             "--seed", str(args.seed),
         ]
+        
+        # Add param_based flag if needed
+        if args.param_based:
+            cmd.append("--param_based")
         
         # Run the command
         logger.info(f"Running command: {' '.join(cmd)}")
         try:
             subprocess.run(cmd, check=True)
-            logger.info(f"Successfully completed importance pruning for task: {task_name}")
+            logger.info(f"Successfully completed importance-based pruning for task: {task}")
             
             # Find the log file for this task
+            suffix = "param" if args.param_based else "token"
             log_file = os.path.join(
                 task_output_dir, 
-                f"{task_name}_importance_prune{int(prune_percent)}_type{importance_type}.log"
+                f"{task}_importance_{suffix}_prune{int(task_params['prune_percent'])}.log"
             )
             # Try alternative filename if not found
             if not os.path.exists(log_file):
                 log_file = os.path.join(
                     task_output_dir, 
-                    f"{task_name}_importance_prune{prune_percent}_type{importance_type}.log"
+                    f"{task}_importance_prune{task_params['prune_percent']}.log"
                 )
             # Try a pattern-based search as a fallback
             if not os.path.exists(log_file):
-                pattern = f"{task_name}_importance_prune*_type{importance_type}.log"
+                pattern = f"{task}_importance*prune*.log"
                 matching_files = glob.glob(os.path.join(task_output_dir, pattern))
                 if matching_files:
                     log_file = matching_files[0]
@@ -362,20 +399,20 @@ def main():
             if os.path.exists(log_file):
                 # Parse results from the log file
                 task_results = parse_log_file(log_file)
-                all_results[task_name] = task_results
+                all_results[task] = task_results
             else:
-                logger.warning(f"Log file not found for task {task_name}")
-                pattern_path = os.path.join(task_output_dir, f"{task_name}_importance_prune*_type{importance_type}.log")
+                logger.warning(f"Log file not found for task {task}")
+                pattern_path = os.path.join(task_output_dir, f"{task}_importance*prune*.log")
                 logger.warning(f"Tried looking for: {pattern_path}")
                 
         except subprocess.CalledProcessError as e:
-            logger.error(f"Error running importance pruning for task {task_name}: {e}")
+            logger.error(f"Error running importance-based pruning for task {task}: {e}")
             continue
     
     # Create summary of results
     if all_results:
         logger.info("\n" + "=" * 80)
-        logger.info("SUMMARY OF RESULTS")
+        logger.info(f"SUMMARY OF RESULTS - {pruning_type.upper()}")
         logger.info("=" * 80)
         
         # Create DataFrame for test results
@@ -408,7 +445,7 @@ def main():
         
         # Save summary to file
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        summary_file = os.path.join(args.output_dir, f"summary_results_{timestamp}.csv")
+        summary_file = os.path.join(pruning_dir, f"summary_results_{timestamp}.csv")
         
         # Combine all metrics
         all_metrics = {}

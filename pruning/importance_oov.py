@@ -192,7 +192,9 @@ def get_dataset_tokens_with_importance(task_name, train_only=True, importance_ty
     
     return token_counter, token_importance, all_token_ids
 
-def importance_based_pruning(token_counter, token_importance, prune_percent, min_tokens=5):
+def importance_based_pruning(token_counter, token_importance, prune_percent, min_tokens=5,
+                          param_based=False, embedding_dim=768, total_params=None,
+                          total_vocab_size=None):
     """
     Prune vocabulary based on token importance scores.
     Used by the word importance based pruning method.
@@ -200,63 +202,152 @@ def importance_based_pruning(token_counter, token_importance, prune_percent, min
     Args:
         token_counter: Counter with token frequencies
         token_importance: Dict with token_id -> importance score mappings
-        prune_percent: Percentage of tokens to prune
+        prune_percent: Percentage of tokens or parameters to prune
         min_tokens: Minimum number of tokens to keep
+        param_based: If True, prune based on parameter percentage rather than token percentage
+        embedding_dim: Dimension of token embeddings (needed for parameter calculation)
+        total_params: Total parameters in the model (needed for parameter-based pruning)
+        total_vocab_size: Total size of the original vocabulary
         
     Returns:
         tokens_to_keep: List of token IDs to keep
         tokens_to_remove: List of token IDs to remove
     """
-    logger.info(f"Performing importance-based pruning with prune_percent={prune_percent}%")
+    if param_based:
+        logger.info(f"Performing parameter-based importance pruning with prune_percent={prune_percent}% of total parameters")
+    else:
+        logger.info(f"Performing token-based importance pruning with prune_percent={prune_percent}%")
     
-    # Sort tokens by importance (highest first)
+    # Sort tokens by importance (highest importance first)
     sorted_tokens = sorted(
-        [(token_id, token_importance[token_id]) for token_id in token_importance],
-        key=lambda x: x[1],
+        token_importance.items(), 
+        key=lambda x: x[1], 
         reverse=True
     )
+    
+    train_token_ids = [token_id for token_id, _ in sorted_tokens]
+    logger.info(f"Dataset contains {len(train_token_ids)} unique tokens")
     
     # Always keep special tokens (first 5 tokens are usually special tokens in ModernBERT)
     special_tokens = list(range(5))
     
-    # Calculate number of tokens to keep (excluding special tokens)
-    num_prunable_tokens = len(sorted_tokens) - len(special_tokens)
-    num_tokens_to_keep = max(min_tokens, int(num_prunable_tokens * (1 - prune_percent / 100)))
+    # Calculate parameter reduction achieved by keeping only training tokens
+    if param_based and total_params is not None and total_vocab_size is not None:
+        # Calculate parameter reduction from keeping only train tokens
+        full_emb_params = total_vocab_size * embedding_dim
+        train_emb_params = len(train_token_ids) * embedding_dim
+        param_reduction_from_train_only = full_emb_params - train_emb_params
+        
+        # Calculate what percentage of total parameters this represents
+        train_only_reduction_percent = 100 * (param_reduction_from_train_only / total_params)
+        
+        logger.info(f"Full vocabulary: {total_vocab_size} tokens")
+        logger.info(f"Keeping only train tokens reduces params by {param_reduction_from_train_only:,} parameters")
+        logger.info(f"This is {train_only_reduction_percent:.2f}% of total model parameters")
+        
+        # If train-only reduction already exceeds target, keep all train tokens
+        if train_only_reduction_percent >= prune_percent:
+            logger.info(f"Train-only reduction ({train_only_reduction_percent:.2f}%) already exceeds target ({prune_percent}%)")
+            logger.info("Keeping all training tokens without further pruning")
+            return train_token_ids, []
+        
+        # Otherwise, calculate how many more tokens we need to prune
+        target_param_reduction = (prune_percent / 100) * total_params
+        additional_param_reduction_needed = target_param_reduction - param_reduction_from_train_only
+        additional_tokens_to_remove = int(additional_param_reduction_needed / embedding_dim)
+        
+        # Get non-special tokens from the train set
+        train_non_special_tokens = [token_id for token_id in train_token_ids if token_id not in special_tokens]
+        
+        # We can't remove more tokens than are available in the non-special train set
+        additional_tokens_to_remove = min(additional_tokens_to_remove, len(train_non_special_tokens))
+        
+        logger.info(f"Need additional {additional_param_reduction_needed:,} parameter reduction")
+        logger.info(f"This requires removing {additional_tokens_to_remove} more tokens")
+        
+        # Calculate how many non-special tokens to keep
+        num_non_special_to_keep = len(train_non_special_tokens) - additional_tokens_to_remove
+        num_non_special_to_keep = max(min_tokens, num_non_special_to_keep)
+        
+        # Get tokens to keep (highest importance ones first)
+        tokens_to_keep = special_tokens.copy()
+        tokens_kept = 0
+        
+        # Add most important non-special tokens
+        for token_id, _ in sorted_tokens:
+            if token_id not in special_tokens:
+                tokens_to_keep.append(token_id)
+                tokens_kept += 1
+                if tokens_kept >= num_non_special_to_keep:
+                    break
+        
+        # Calculate tokens removed from training set
+        tokens_to_remove = [token_id for token_id in train_token_ids if token_id not in tokens_to_keep]
+        
+        # Calculate final parameter reduction
+        token_reduction = (total_vocab_size - len(tokens_to_keep))
+        final_param_reduction = token_reduction * embedding_dim
+        final_reduction_percent = 100 * (final_param_reduction / total_params)
+        
+        logger.info(f"Kept {len(tokens_to_keep)} tokens total ({len(tokens_to_keep) - len(special_tokens)} non-special)")
+        logger.info(f"Removed {len(tokens_to_remove)} tokens from training set")
+        logger.info(f"Total vocabulary reduction: {token_reduction} tokens from full vocabulary")
+        logger.info(f"This reduces parameters by {final_param_reduction:,} parameters")
+        logger.info(f"Overall parameter reduction: {final_reduction_percent:.2f}% of total model parameters")
+        
+        return tokens_to_keep, tokens_to_remove
     
-    # Get tokens to keep (most important ones)
-    tokens_to_keep = special_tokens.copy()
-    
-    # Add most important non-special tokens
-    for token_id, importance in sorted_tokens:
-        if token_id not in special_tokens:
-            tokens_to_keep.append(token_id)
-            if len(tokens_to_keep) - len(special_tokens) >= num_tokens_to_keep:
-                break
-    
-    # Get tokens to remove
-    tokens_to_remove = [token_id for token_id, _ in sorted_tokens if token_id not in tokens_to_keep]
-    
-    logger.info(f"Kept {len(tokens_to_keep)} tokens, removed {len(tokens_to_remove)} tokens")
-    
-    return tokens_to_keep, tokens_to_remove
+    else:
+        # Calculate number of tokens to keep (excluding special tokens)
+        num_prunable_tokens = len(sorted_tokens) - len(special_tokens)
+        num_tokens_to_keep = max(min_tokens, int(num_prunable_tokens * (1 - prune_percent / 100)))
+        
+        # Get tokens to keep (most important ones)
+        tokens_to_keep = special_tokens.copy()
+        
+        # Add most important non-special tokens
+        for token_id, _ in sorted_tokens:
+            if token_id not in special_tokens:
+                tokens_to_keep.append(token_id)
+                if len(tokens_to_keep) - len(special_tokens) >= num_tokens_to_keep:
+                    break
+        
+        # Get tokens to remove
+        tokens_to_remove = [token_id for token_id, _ in sorted_tokens if token_id not in tokens_to_keep]
+        
+        # Calculate parameter reduction for logging
+        param_reduction_percent = 100 * (len(tokens_to_remove) / len(train_token_ids))
+        logger.info(f"Kept {len(tokens_to_keep)} tokens, removed {len(tokens_to_remove)} tokens")
+        logger.info(f"This is a {param_reduction_percent:.2f}% reduction in token count")
+        
+        if total_params and embedding_dim:
+            param_reduction = len(tokens_to_remove) * embedding_dim
+            overall_param_reduction_percent = 100 * (param_reduction / total_params)
+            logger.info(f"Parameter reduction: {param_reduction:,} parameters")
+            logger.info(f"Overall parameter reduction: {overall_param_reduction_percent:.2f}% of total model parameters")
+        
+        return tokens_to_keep, tokens_to_remove
 
-def setup_importance_oov_model(task_name, model_name, prune_percent=20, num_clusters=50, importance_type=3):
+def setup_importance_oov_model(task_name, model_name, prune_percent=20, num_clusters=50, importance_type=3, param_based=False):
     """
-    Set up a model with word importance-based OOV vocabulary pruning.
+    Set up a model with word importance-based vocabulary pruning and OOV clustering.
+    This combines approaches from frequency-based pruning and clustering.
     
     Args:
         task_name: Name of the GLUE task
         model_name: Base model to use
-        prune_percent: Percentage of tokens to prune based on importance
-        num_clusters: Number of clusters for OOV token mapping
+        prune_percent: Percentage of tokens or parameters to prune based on importance
+        num_clusters: Number of clusters to create for OOV tokens
         importance_type: Word importance setting (0=frequency only, 1-3=TF-IDF variants)
+        param_based: If True, prune based on parameter percentage rather than token percentage
         
     Returns:
-        model: Model with importance-OOV based vocabulary
+        model: Model with importance-based vocabulary pruning and OOV clustering
         token_map: Mapping from original token IDs to new IDs
-        oov_lookup: Mapping from OOV token ID to cluster representative ID
+        oov_lookup: Mapping for OOV tokens to cluster representatives
     """
-    logger.info(f"Setting up importance-OOV model for {task_name} with {prune_percent}% pruning, {num_clusters} OOV clusters, importance_type={importance_type}")
+    pruning_type = "parameter-based" if param_based else "token-based"
+    logger.info(f"Setting up {pruning_type} importance-OOV model for {task_name} with {prune_percent}% pruning, {num_clusters} OOV clusters, importance_type={importance_type}")
     
     # Load GLUE task metadata
     task_meta = get_task_metadata(task_name)
@@ -269,19 +360,34 @@ def setup_importance_oov_model(task_name, model_name, prune_percent=20, num_clus
     # Load model for embedding extraction
     model = AutoModelForSequenceClassification.from_pretrained(model_name, num_labels=n_labels)
     
-    # Step 1: Importance-based pruning
-    if importance_type > 0 and NLTK_AVAILABLE:
-        tokens_to_keep, tokens_to_remove = importance_based_pruning(token_counter, token_importance, prune_percent)
-    else:
-        tokens_to_keep, tokens_to_remove = frequency_based_pruning(token_counter, prune_percent)
+    # Get total model parameters and embedding dimension
+    total_params = sum(p.numel() for p in model.parameters())
+    embedding_dim = model.model.embeddings.tok_embeddings.embedding_dim
+    total_vocab_size = model.model.embeddings.tok_embeddings.num_embeddings
     
-    # Step 2: Cluster removed tokens
-    oov_token_map, cluster_centers = cluster_removed_tokens(tokens_to_remove, model, num_clusters)
+    logger.info(f"Model has {total_params:,} total parameters")
+    logger.info(f"Token embeddings: {total_vocab_size:,} tokens with dimension {embedding_dim}")
     
-    # Step 3: Create hybrid embeddings
-    token_map, reduced_embeddings, oov_lookup = create_hybrid_embeddings(
-        tokens_to_keep, oov_token_map, cluster_centers, model
+    # Importance-based pruning
+    tokens_to_keep, tokens_to_remove = importance_based_pruning(
+        token_counter,
+        token_importance,
+        prune_percent,
+        param_based=param_based,
+        embedding_dim=embedding_dim,
+        total_params=total_params,
+        total_vocab_size=total_vocab_size
     )
+    
+    # Cluster removed tokens if there are any tokens to remove
+    if tokens_to_remove:
+        oov_lookup = cluster_removed_tokens(tokens_to_remove, tokens_to_keep, model, num_clusters)
+    else:
+        oov_lookup = {}
+    
+    # Create hybrid embeddings with OOV token clustering
+    logger.info(f"Creating hybrid embeddings for {len(tokens_to_keep)} kept tokens and {len(oov_lookup)} OOV tokens")
+    token_map, reduced_embeddings = create_hybrid_embeddings(tokens_to_keep, oov_lookup, model)
     
     # Replace embedding layer with reduced version
     model.model.embeddings.tok_embeddings = nn.Embedding.from_pretrained(

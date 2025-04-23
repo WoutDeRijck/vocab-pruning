@@ -214,6 +214,12 @@ def parse_args():
         help="Random seed"
     )
     
+    parser.add_argument(
+        "--param_based", 
+        action="store_true",
+        help="If set, prune based on parameter percentage rather than token percentage"
+    )
+    
     return parser.parse_args()
 
 def parse_log_file(log_file):
@@ -265,14 +271,20 @@ def parse_log_file(log_file):
     return metrics
 
 def main():
-    """Run word importance-based OOV pruning on specified GLUE tasks."""
+    """Run importance-oov-based pruning on specified GLUE tasks."""
     args = parse_args()
     
     # Create output directory
     os.makedirs(args.output_dir, exist_ok=True)
     
+    # Create a subdirectory based on pruning type
+    pruning_type = "param_based" if args.param_based else "token_based"
+    pruning_dir = os.path.join(args.output_dir, pruning_type)
+    os.makedirs(pruning_dir, exist_ok=True)
+    
     # Log arguments
     logger.info(f"Running with arguments: {args}")
+    logger.info(f"Pruning type: {'Parameter-based' if args.param_based else 'Token-based'}")
     
     # Dictionary to store results for each task
     all_results = {}
@@ -303,12 +315,12 @@ def main():
             task_params["importance_type"] = args.importance_type
         
         # Create task-specific output directory
-        task_output_dir = os.path.join(args.output_dir, task)
+        task_output_dir = os.path.join(pruning_dir, task)
         os.makedirs(task_output_dir, exist_ok=True)
         
         # Log task parameters
         logger.info(f"\n{'=' * 50}")
-        logger.info(f"Running word importance-based OOV pruning for task: {task}")
+        logger.info(f"Running importance-oov pruning for task: {task}")
         logger.info(f"Parameters: {task_params}")
         logger.info(f"{'=' * 50}")
         
@@ -318,27 +330,32 @@ def main():
             "--task", task,
             "--model_name", args.model_name,
             "--pruning_method", "importance_oov",
+            "--importance_type", str(task_params["importance_type"]),
+            "--num_clusters", str(task_params["num_clusters"]),
             "--prune_percent", str(task_params["prune_percent"]),
             "--epochs", str(task_params["epochs"]),
             "--learning_rate", str(task_params["learning_rate"]),
             "--batch_size", str(task_params["batch_size"]),
             "--weight_decay", str(task_params["weight_decay"]),
-            "--num_clusters", str(task_params["num_clusters"]),
-            "--importance_type", str(task_params["importance_type"]),
             "--output_dir", task_output_dir,
             "--seed", str(args.seed),
         ]
+        
+        # Add param_based flag if needed
+        if args.param_based:
+            cmd.append("--param_based")
         
         # Run the command
         logger.info(f"Running command: {' '.join(cmd)}")
         try:
             subprocess.run(cmd, check=True)
-            logger.info(f"Successfully completed word importance-based OOV pruning for task: {task}")
+            logger.info(f"Successfully completed importance-oov pruning for task: {task}")
             
             # Find the log file for this task
+            suffix = "param" if args.param_based else "token"
             log_file = os.path.join(
                 task_output_dir, 
-                f"{task}_importance_oov_prune{int(task_params['prune_percent'])}_clusters{int(task_params['num_clusters'])}_type{task_params['importance_type']}.log"
+                f"{task}_importance_oov_{suffix}_prune{int(task_params['prune_percent'])}_clusters{task_params['num_clusters']}_type{task_params['importance_type']}.log"
             )
             # Try alternative filename if not found
             if not os.path.exists(log_file):
@@ -348,7 +365,7 @@ def main():
                 )
             # Try a pattern-based search as a fallback
             if not os.path.exists(log_file):
-                pattern = f"{task}_importance_oov_prune*_clusters*_type{task_params['importance_type']}.log"
+                pattern = f"{task}_importance_oov*prune*.log"
                 matching_files = glob.glob(os.path.join(task_output_dir, pattern))
                 if matching_files:
                     log_file = matching_files[0]
@@ -359,17 +376,17 @@ def main():
                 all_results[task] = task_results
             else:
                 logger.warning(f"Log file not found for task {task}")
-                pattern_path = os.path.join(task_output_dir, f"{task}_importance_oov_prune*_clusters*_type{task_params['importance_type']}.log")
+                pattern_path = os.path.join(task_output_dir, f"{task}_importance_oov*prune*.log")
                 logger.warning(f"Tried looking for: {pattern_path}")
                 
         except subprocess.CalledProcessError as e:
-            logger.error(f"Error running word importance-based OOV pruning for task {task}: {e}")
+            logger.error(f"Error running importance-oov pruning for task {task}: {e}")
             continue
     
     # Create summary of results
     if all_results:
         logger.info("\n" + "=" * 80)
-        logger.info("SUMMARY OF RESULTS")
+        logger.info(f"SUMMARY OF RESULTS - {pruning_type.upper()}")
         logger.info("=" * 80)
         
         # Create DataFrame for test results
@@ -402,7 +419,7 @@ def main():
         
         # Save summary to file
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        summary_file = os.path.join(args.output_dir, f"summary_results_{timestamp}.csv")
+        summary_file = os.path.join(pruning_dir, f"summary_results_{timestamp}.csv")
         
         # Combine all metrics
         all_metrics = {}
