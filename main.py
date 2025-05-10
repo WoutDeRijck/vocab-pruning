@@ -516,46 +516,69 @@ def run_cross_validation_pipeline(args, tokenizer):
             
             # Apply token remapping to create datasets with reduced vocabulary
             logger.info("Applying vocabulary mapping to datasets")
-            
-            # Function to remap tokens in a dataset
-            def remap_tokens(dataset):
-                # If no token_map (no pruning case), return the dataset unchanged
-                if token_map is None:
-                    logger.info("No token mapping applied (using full vocabulary)")
-                    return dataset
+
+            # For OOV methods using TokenMappingWrapper, we should keep the original datasets
+            if args.pruning_method == "frequency_oov" or args.pruning_method == "importance_oov":
+                logger.info("Using TokenMappingWrapper for token remapping during forward pass, keeping original datasets")
+                # Just make sure the label column is named correctly
+                if 'label' in train_dataset.column_names and 'labels' not in train_dataset.column_names:
+                    train_dataset = train_dataset.rename_column('label', 'labels')
+                if 'label' in eval_dataset.column_names and 'labels' not in eval_dataset.column_names:
+                    eval_dataset = eval_dataset.rename_column('label', 'labels')
+                if 'label' in test_dataset.column_names and 'labels' not in test_dataset.column_names:
+                    test_dataset = test_dataset.rename_column('label', 'labels')
                 
-                # Create a mapping dictionary for quick lookup
-                id_map_dict = token_map.copy()
-                if oov_lookup:
-                    id_map_dict.update(oov_lookup)
+                # Use original datasets
+                remapped_train = train_dataset
+                remapped_eval = eval_dataset
+                remapped_test = test_dataset
+            # For no_pruning, we'll use the datasets as-is
+            elif token_map is None:
+                logger.info("No token mapping applied (using full vocabulary)")
+                # Ensure label column naming consistency
+                for dataset in [train_dataset, eval_dataset, test_dataset]:
+                    if 'label' in dataset.column_names and 'labels' not in dataset.column_names:
+                        dataset = dataset.rename_column('label', 'labels')
                 
-                def map_example(example):
-                    # Map input_ids using our token mapping
-                    new_input_ids = []
-                    for token_id in example['input_ids']:
-                        if token_id in id_map_dict:
-                            new_input_ids.append(id_map_dict[token_id])
-                        else:
-                            # Use UNK token (0) for OOV tokens
-                            new_input_ids.append(0)
+                # Use original datasets
+                remapped_train = train_dataset
+                remapped_eval = eval_dataset
+                remapped_test = test_dataset
+            else:
+                # Function to remap tokens in a dataset
+                def remap_tokens(dataset):
+                    # Create a mapping dictionary for quick lookup
+                    id_map_dict = token_map.copy()
+                    if oov_lookup:
+                        id_map_dict.update(oov_lookup)
                     
-                    example['input_ids'] = new_input_ids
-                    return example
+                    def map_example(example):
+                        # Map input_ids using our token mapping
+                        new_input_ids = []
+                        for token_id in example['input_ids']:
+                            if token_id in id_map_dict:
+                                new_input_ids.append(id_map_dict[token_id])
+                            else:
+                                # Use UNK token (0) for OOV tokens
+                                new_input_ids.append(0)
+                        
+                        example['input_ids'] = new_input_ids
+                        return example
+                    
+                    # Apply mapping to each example
+                    remapped_dataset = dataset.map(map_example, desc="Remapping token IDs")
+                    
+                    # Rename 'label' to 'labels' if it exists (important for data collator compatibility)
+                    if 'label' in remapped_dataset.column_names and 'labels' not in remapped_dataset.column_names:
+                        logger.info("Renaming 'label' column to 'labels' for compatibility with data collator")
+                        remapped_dataset = remapped_dataset.rename_column('label', 'labels')
+                    
+                    return remapped_dataset
                 
-                # Apply mapping to each example
-                remapped_dataset = dataset.map(map_example, desc="Remapping token IDs")
-                
-                # Rename 'label' to 'labels' if it exists (important for data collator compatibility)
-                if 'label' in remapped_dataset.column_names and 'labels' not in remapped_dataset.column_names:
-                    logger.info("Renaming 'label' column to 'labels' for compatibility with data collator")
-                    remapped_dataset = remapped_dataset.rename_column('label', 'labels')
-                
-                return remapped_dataset
-            
-            # Apply remapping to all datasets
-            remapped_train = remap_tokens(train_dataset)
-            remapped_eval = remap_tokens(eval_dataset)
-            remapped_test = remap_tokens(test_dataset)
+                # Apply remapping to all datasets
+                remapped_train = remap_tokens(train_dataset)
+                remapped_eval = remap_tokens(eval_dataset)
+                remapped_test = remap_tokens(test_dataset)
             
             # Set up fold-specific output directory
             fold_output_dir = os.path.join(args.output_dir, f"fold_{fold_idx+1}")
@@ -569,11 +592,11 @@ def run_cross_validation_pipeline(args, tokenizer):
             if args.pruning_method == "no_pruning":
                 trainer, metrics_callback = setup_training(
                     model, 
-                    train_dataset,  # Use original dataset
-                    eval_dataset,   # Use original dataset
+                    remapped_train,   # Now using remapped dataset which is the original for no_pruning
+                    remapped_eval,    # Now using remapped dataset which is the original for no_pruning
                     args.task, 
                     fold_args,
-                    tokenizer=tokenizer
+                    tokenizer=tokenizer  # Still need to pass tokenizer for no_pruning
                 )
             else:
                 trainer, metrics_callback = setup_training(
@@ -804,8 +827,20 @@ def run_standard_pipeline(args, tokenizer):
             random_seed=args.seed
         )
         
+        # For frequency_oov and importance_oov methods, we now use the TokenMappingWrapper
+        # which handles token remapping during the forward pass. So we shouldn't remap
+        # the datasets anymore.
+        if args.pruning_method == "frequency_oov" or args.pruning_method == "importance_oov":
+            logger.info("Using TokenMappingWrapper for token remapping during forward pass, keeping original datasets")
+            # Just make sure the label column is named correctly
+            if 'label' in train_dataset.column_names and 'labels' not in train_dataset.column_names:
+                train_dataset = train_dataset.rename_column('label', 'labels')
+            if 'label' in eval_dataset.column_names and 'labels' not in eval_dataset.column_names:
+                eval_dataset = eval_dataset.rename_column('label', 'labels')
+            if 'label' in test_dataset.column_names and 'labels' not in test_dataset.column_names:
+                test_dataset = test_dataset.rename_column('label', 'labels')
         # For no_pruning, we'll use the datasets as-is (no remapping needed)
-        if args.pruning_method == "no_pruning":
+        elif args.pruning_method == "no_pruning":
             logger.info("Using original validation set with train/test split without token remapping for no_pruning baseline")
             # Just make sure the label column is named correctly
             for dataset in [train_dataset, eval_dataset, test_dataset]:

@@ -18,7 +18,7 @@ try:
 except ImportError:
     NLTK_AVAILABLE = False
 
-from .base import create_hybrid_embeddings
+from .base import create_hybrid_embeddings, TokenMappingWrapper
 from .frequency import frequency_based_pruning
 from .frequency_oov import cluster_removed_tokens
 from utils import get_task_metadata
@@ -394,4 +394,7 @@ def setup_importance_oov_model(task_name, model_name, prune_percent=20, num_clus
         reduced_embeddings, freeze=False
     )
     
-    return model, token_map, oov_lookup 
+    # Wrap model to handle token remapping during forward pass
+    wrapped_model = TokenMappingWrapper(model, token_map, oov_lookup)
+    
+    return wrapped_model, token_map, oov_lookup 

@@ -11,7 +11,7 @@ import torch.nn as nn
 from sklearn.cluster import KMeans
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
 
-from .base import get_dataset_tokens_with_counts, create_hybrid_embeddings
+from .base import get_dataset_tokens_with_counts, create_hybrid_embeddings, TokenMappingWrapper
 from .frequency import frequency_based_pruning
 from utils import get_task_metadata
 
@@ -156,4 +156,7 @@ def setup_frequency_oov_model(task_name, model_name, prune_percent=20, num_clust
         reduced_embeddings, freeze=False
     )
     
-    return model, token_map, oov_lookup 
+    # Step 4: Wrap the model to handle token remapping during forward pass
+    wrapped_model = TokenMappingWrapper(model, token_map, oov_lookup)
+    
+    return wrapped_model, token_map, oov_lookup 

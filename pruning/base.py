@@ -9,6 +9,8 @@ from collections import Counter
 import torch
 from datasets import load_dataset
 from transformers import AutoTokenizer
+import torch.nn as nn
+import copy
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -17,6 +19,7 @@ logger = logging.getLogger(__name__)
 task_to_keys = {
     "cola": ("sentence", None),
     "mnli": ("premise", "hypothesis"),
+    "mnli-mm": ("premise", "hypothesis"),
     "mrpc": ("sentence1", "sentence2"),
     "qnli": ("question", "sentence"),
     "qqp": ("question1", "question2"),
@@ -25,6 +28,56 @@ task_to_keys = {
     "stsb": ("sentence1", "sentence2"),
     "wnli": ("sentence1", "sentence2"),
 }
+
+# Add a new TokenMappingWrapper class to handle token remapping
+class TokenMappingWrapper(nn.Module):
+    """
+    Model wrapper that applies token mapping before the embedding layer
+    to handle vocabulary pruning.
+    """
+    def __init__(self, model, token_map=None, oov_lookup=None):
+        super().__init__()
+        self.model = model
+        self.token_map = token_map or {}
+        self.oov_lookup = oov_lookup or {}
+        
+        # Combine mappings for faster lookup
+        self.combined_map = {}
+        if token_map:
+            self.combined_map.update(token_map)
+        if oov_lookup:
+            self.combined_map.update(oov_lookup)
+            
+        logger.info(f"TokenMappingWrapper initialized with {len(self.token_map)} mapped tokens and {len(set(self.oov_lookup.values()))} OOV clusters")
+        
+    def forward(self, input_ids=None, attention_mask=None, **kwargs):
+        # Only process if we have input_ids and mappings
+        if input_ids is not None and self.combined_map:
+            # Create a new tensor to hold the mapped input IDs
+            mapped_input_ids = torch.zeros_like(input_ids)
+            
+            # Apply mapping to each element in the input_ids tensor
+            for i in range(input_ids.size(0)):
+                for j in range(input_ids.size(1)):
+                    token_id = input_ids[i, j].item()
+                    if token_id in self.combined_map:
+                        mapped_input_ids[i, j] = self.combined_map[token_id]
+                    else:
+                        # For OOV tokens not in mapping, use UNK token (0)
+                        mapped_input_ids[i, j] = 0
+            
+            # Replace input_ids with mapped version
+            input_ids = mapped_input_ids
+        
+        # Forward pass with mapped input_ids
+        return self.model(input_ids=input_ids, attention_mask=attention_mask, **kwargs)
+    
+    # Forward all other attributes to the wrapped model
+    def __getattr__(self, name):
+        try:
+            return super().__getattr__(name)
+        except AttributeError:
+            return getattr(self.model, name)
 
 # Get the basic dataset vocabulary (for clustering-based pruning)
 def get_dataset_vocabulary(task_name, train_only=True):
@@ -95,7 +148,7 @@ def get_dataset_tokens_with_counts(task_name, train_only=True):
         token_counter: Counter with token_id -> count mappings
         all_token_ids: Set of all token IDs seen in the dataset
     """
-    logger.info(f"Getting dataset vocabulary with counts for {task_name}, train_only={train_only}")
+    logger.info(f"Getting dataset vocabulary for {task_name}, train_only={train_only}")
     
     # Load the dataset
     raw_datasets = load_dataset("glue", task_name)
@@ -107,7 +160,7 @@ def get_dataset_tokens_with_counts(task_name, train_only=True):
     # Counter to store token counts
     token_counter = Counter()
     
-    # Set to store all unique token IDs (including low frequency)
+    # Set to store all unique token IDs
     all_token_ids = set()
     
     # Determine which splits to process
@@ -122,7 +175,6 @@ def get_dataset_tokens_with_counts(task_name, train_only=True):
         # Process sentence1
         texts = raw_datasets[split][sentence1_key]
         for text in texts:
-            # Get token IDs instead of tokens
             token_ids = tokenizer.encode(text, add_special_tokens=True)
             token_counter.update(token_ids)
             all_token_ids.update(token_ids)
@@ -170,30 +222,49 @@ def create_reduced_embeddings(task_vocab, model):
 # Create hybrid embeddings (used by hybrid and importance pruning)
 def create_hybrid_embeddings(tokens_to_keep, oov_lookup, model):
     """
-    Create reduced embedding matrix with hybrid token mapping.
-    Used by hybrid and importance-based pruning.
+    Create hybrid embeddings for a reduced vocabulary.
+    Used by multiple pruning methods.
     
     Args:
-        tokens_to_keep: List of token IDs to keep
-        oov_lookup: Mapping from removed token ID to cluster center token ID
-        model: Model whose embeddings will be used
+        tokens_to_keep: List of token IDs to keep from original vocab
+        oov_lookup: Dictionary mapping OOV token IDs to representative token IDs
+        model: Original model with full embedding matrix
         
     Returns:
-        token_map: Mapping from original token IDs to new consecutive IDs
-        reduced_embeddings: Reduced embedding matrix
+        token_map: Mapping from original token ID to new token ID
+        reduced_embeddings: Tensor with reduced vocabulary embeddings
     """
-    logger.info(f"Creating hybrid embeddings with {len(tokens_to_keep)} kept tokens and {len(oov_lookup)} OOV tokens")
-    
     # Get original embedding matrix
     original_embeddings = model.model.embeddings.tok_embeddings.weight.data
     
-    # Start with kept tokens
-    all_tokens_to_keep = list(tokens_to_keep)
+    # Create a map from original token ID to new token ID
+    token_map = {}
+    for i, token_id in enumerate(tokens_to_keep):
+        token_map[token_id] = i
     
-    # Create mapping from original token IDs to new consecutive IDs
-    token_map = {old_id: new_id for new_id, old_id in enumerate(all_tokens_to_keep)}
+    # Get the embeddings for tokens we're keeping
+    kept_embeddings = original_embeddings[tokens_to_keep]
     
-    # Create reduced embedding matrix with only the needed vectors
-    reduced_embeddings = torch.stack([original_embeddings[i] for i in all_tokens_to_keep])
+    # For OOV, get representative embeddings
+    if oov_lookup:
+        # Get unique representatives for logging
+        oov_clusters = set(oov_lookup.values())
+        logger.info(f"Creating embeddings with {len(tokens_to_keep)} kept tokens and {len(oov_clusters)} OOV representatives")
+        
+        # The OOV map already points to original token IDs that are in tokens_to_keep
+        # So we just need to update the map to point to the new indices
+        for token_id in oov_lookup:
+            if token_id not in token_map:  # Skip if already kept
+                representative_id = oov_lookup[token_id]
+                if representative_id in token_map:
+                    # Map to existing representative in reduced vocabulary
+                    token_map[token_id] = token_map[representative_id]
+                else:
+                    # This shouldn't happen with proper cluster setup
+                    logger.warning(f"Representative token {representative_id} for {token_id} not in token_map!")
+                    # Fallback to UNK token
+                    token_map[token_id] = 0
+    else:
+        logger.info(f"Creating embeddings with {len(tokens_to_keep)} kept tokens (no OOV mapping)")
     
-    return token_map, reduced_embeddings 
+    return token_map, kept_embeddings 
