@@ -48,11 +48,15 @@ class TokenMappingWrapper(nn.Module):
         if oov_lookup:
             self.combined_map.update(oov_lookup)
             
+        # Determine embedding size for clamping
+        self.embedding_size = model.model.embeddings.tok_embeddings.weight.size(0)
+        
         logger.info(f"TokenMappingWrapper initialized with {len(self.token_map)} mapped tokens and {len(set(self.oov_lookup.values()))} OOV clusters")
+        logger.info(f"Embedding matrix size: {self.embedding_size}")
         
     def forward(self, input_ids=None, attention_mask=None, **kwargs):
-        # Only process if we have input_ids and mappings
-        if input_ids is not None and self.combined_map:
+        # Only process if we have input_ids
+        if input_ids is not None:
             # Create a new tensor to hold the mapped input IDs
             mapped_input_ids = torch.zeros_like(input_ids)
             
@@ -65,6 +69,9 @@ class TokenMappingWrapper(nn.Module):
                     else:
                         # For OOV tokens not in mapping, use UNK token (0)
                         mapped_input_ids[i, j] = 0
+            
+            # Ensure no out-of-bounds indices by clamping to valid range
+            mapped_input_ids = torch.clamp(mapped_input_ids, 0, self.embedding_size - 1)
             
             # Replace input_ids with mapped version
             input_ids = mapped_input_ids
@@ -208,14 +215,34 @@ def create_reduced_embeddings(task_vocab, model):
     """
     logger.info(f"Creating reduced embeddings for task_vocab of size {len(task_vocab)}")
     
+    # Get original embedding matrix
+    original_embeddings = model.model.embeddings.tok_embeddings.weight.data
+    original_size = original_embeddings.size(0)
+    
+    # Make sure task_vocab only contains valid indices
+    valid_tokens = [t for t in task_vocab if t < original_size]
+    if len(valid_tokens) < len(task_vocab):
+        logger.warning(f"Removed {len(task_vocab) - len(valid_tokens)} out-of-bounds token indices from task_vocab")
+        task_vocab = valid_tokens
+    
     # Create mapping from original token IDs to new consecutive IDs
     token_map = {old_id: new_id for new_id, old_id in enumerate(task_vocab)}
     
-    # Get original embedding matrix
-    original_embeddings = model.model.embeddings.tok_embeddings.weight.data
-    
     # Create new embedding matrix with only the needed vectors
-    reduced_embeddings = torch.stack([original_embeddings[i] for i in task_vocab])
+    try:
+        # Use safer indexing approach
+        reduced_embeddings = torch.stack([original_embeddings[i] for i in task_vocab])
+    except IndexError as e:
+        # If we encounter an index error, log and use a more defensive approach
+        logger.error(f"IndexError in create_reduced_embeddings: {e}")
+        # Get the max valid index
+        max_index = original_embeddings.size(0) - 1
+        # Create a safe version of task_vocab with all indices clamped to valid range
+        safe_tokens = [min(token_id, max_index) for token_id in task_vocab]
+        reduced_embeddings = torch.stack([original_embeddings[token_id] for token_id in safe_tokens])
+        logger.info(f"Used safe indexing approach to create embeddings for {len(task_vocab)} tokens")
+    
+    logger.info(f"Final embedding size: {reduced_embeddings.size()}")
     
     return token_map, reduced_embeddings
 
@@ -236,6 +263,13 @@ def create_hybrid_embeddings(tokens_to_keep, oov_lookup, model):
     """
     # Get original embedding matrix
     original_embeddings = model.model.embeddings.tok_embeddings.weight.data
+    original_size = original_embeddings.size(0)
+    
+    # Make sure tokens_to_keep only contains valid indices
+    valid_tokens = [t for t in tokens_to_keep if t < original_size]
+    if len(valid_tokens) < len(tokens_to_keep):
+        logger.warning(f"Removed {len(tokens_to_keep) - len(valid_tokens)} out-of-bounds token indices")
+        tokens_to_keep = valid_tokens
     
     # Create a map from original token ID to new token ID
     token_map = {}
@@ -243,15 +277,26 @@ def create_hybrid_embeddings(tokens_to_keep, oov_lookup, model):
         token_map[token_id] = i
     
     # Get the embeddings for tokens we're keeping
-    kept_embeddings = original_embeddings[tokens_to_keep]
+    try:
+        # Use safer indexing approach to handle potential out-of-bounds indices
+        kept_embeddings = torch.stack([original_embeddings[token_id] for token_id in tokens_to_keep])
+    except IndexError as e:
+        # If we encounter an index error, log and use a more defensive approach
+        logger.error(f"IndexError in create_hybrid_embeddings: {e}")
+        # Get the max valid index
+        max_index = original_embeddings.size(0) - 1
+        # Create a safe version of tokens_to_keep with all indices clamped to valid range
+        safe_tokens = [min(token_id, max_index) for token_id in tokens_to_keep]
+        kept_embeddings = torch.stack([original_embeddings[token_id] for token_id in safe_tokens])
+        logger.info(f"Used safe indexing approach to create embeddings for {len(tokens_to_keep)} tokens")
     
-    # For OOV, get representative embeddings
+    # For OOV, update the mapping for OOV tokens to point to representatives
     if oov_lookup:
         # Get unique representatives for logging
         oov_clusters = set(oov_lookup.values())
         logger.info(f"Creating embeddings with {len(tokens_to_keep)} kept tokens and {len(oov_clusters)} OOV representatives")
         
-        # The OOV map already points to original token IDs that are in tokens_to_keep
+        # The OOV map already points to original token IDs that should be in tokens_to_keep
         # So we just need to update the map to point to the new indices
         for token_id in oov_lookup:
             if token_id not in token_map:  # Skip if already kept
@@ -261,10 +306,12 @@ def create_hybrid_embeddings(tokens_to_keep, oov_lookup, model):
                     token_map[token_id] = token_map[representative_id]
                 else:
                     # This shouldn't happen with proper cluster setup
-                    logger.warning(f"Representative token {representative_id} for {token_id} not in token_map!")
+                    logger.warning(f"Representative token {representative_id} for {token_id} not in token_map! Using UNK token.")
                     # Fallback to UNK token
                     token_map[token_id] = 0
     else:
         logger.info(f"Creating embeddings with {len(tokens_to_keep)} kept tokens (no OOV mapping)")
+    
+    logger.info(f"Final embedding size: {kept_embeddings.size()}")
     
     return token_map, kept_embeddings 

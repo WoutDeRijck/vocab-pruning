@@ -39,14 +39,23 @@ class ReducedVocabDataCollator:
             mask = f['attention_mask'] + [0] * (max_length - len(f['attention_mask']))
             attention_mask.append(mask)
             
-            # Get labels
-            labels.append(f['labels'])
+            # Get labels if they exist, otherwise use 0 as a placeholder
+            if 'labels' in f:
+                labels.append(f['labels'])
+            elif 'label' in f:
+                # Some datasets use 'label' instead of 'labels'
+                labels.append(f['label'])
+            else:
+                # Use 0 as a default/placeholder value for prediction-only data
+                labels.append(0)
         
-        return {
+        result = {
             'input_ids': torch.tensor(input_ids),
             'attention_mask': torch.tensor(attention_mask),
             'labels': torch.tensor(labels)
         }
+        
+        return result
 
 class HybridCollator:
     """
@@ -77,8 +86,15 @@ class HybridCollator:
             mask = f['attention_mask'] + [0] * (max_length - len(f['attention_mask']))
             attention_mask.append(mask)
             
-            # Get labels
-            labels.append(f['labels'])
+            # Get labels if they exist, otherwise use 0 as a placeholder
+            if 'labels' in f:
+                labels.append(f['labels'])
+            elif 'label' in f:
+                # Some datasets use 'label' instead of 'labels'
+                labels.append(f['label'])
+            else:
+                # Use 0 as a default/placeholder value for prediction-only data
+                labels.append(0)
         
         # Check if any labels are -1 (test set)
         has_invalid_labels = any(label == -1 for label in labels)

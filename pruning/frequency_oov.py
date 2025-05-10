@@ -31,15 +31,38 @@ def cluster_removed_tokens(tokens_to_remove, tokens_to_keep, model, num_clusters
         
     Returns:
         oov_lookup: Mapping from removed token ID to nearest cluster center token ID
+        updated_tokens_to_keep: Updated list of tokens to keep (may include cluster centers)
     """
     if not tokens_to_remove:
         logger.info("No tokens to cluster (all tokens kept)")
-        return {}
+        return {}, tokens_to_keep
         
     logger.info(f"Clustering {len(tokens_to_remove)} removed tokens into {num_clusters} clusters")
     
     # Get original embedding matrix
     original_embeddings = model.model.embeddings.tok_embeddings.weight.data
+    
+    # Get the maximum valid token ID (embedding size - 1)
+    max_valid_token_id = original_embeddings.size(0) - 1
+    
+    # Filter out any invalid token IDs from tokens_to_remove and tokens_to_keep
+    valid_tokens_to_remove = [t for t in tokens_to_remove if t <= max_valid_token_id]
+    valid_tokens_to_keep = [t for t in tokens_to_keep if t <= max_valid_token_id]
+    
+    if len(valid_tokens_to_remove) < len(tokens_to_remove):
+        logger.warning(f"Filtered out {len(tokens_to_remove) - len(valid_tokens_to_remove)} invalid token IDs from tokens_to_remove")
+    
+    if len(valid_tokens_to_keep) < len(tokens_to_keep):
+        logger.warning(f"Filtered out {len(tokens_to_keep) - len(valid_tokens_to_keep)} invalid token IDs from tokens_to_keep")
+    
+    # Use the valid tokens
+    tokens_to_remove = valid_tokens_to_remove
+    tokens_to_keep = valid_tokens_to_keep
+    
+    # If after filtering, we have no tokens to remove, return
+    if not tokens_to_remove:
+        logger.info("No valid tokens to cluster after filtering")
+        return {}, tokens_to_keep
     
     # Get embeddings for removed tokens
     removed_embeddings = original_embeddings[tokens_to_remove].cpu().numpy()
@@ -54,6 +77,8 @@ def cluster_removed_tokens(tokens_to_remove, tokens_to_keep, model, num_clusters
     # Initialize mapping from removed token to nearest cluster center token
     oov_lookup = {}
     cluster_centers = []
+    # Create a copy of tokens_to_keep that we can potentially update
+    updated_tokens_to_keep = tokens_to_keep.copy()
     
     # For each cluster, find the token closest to the centroid
     for cluster_id in range(actual_num_clusters):
@@ -70,6 +95,11 @@ def cluster_removed_tokens(tokens_to_remove, tokens_to_keep, model, num_clusters
             distances = np.linalg.norm(cluster_embeddings - centroid, axis=1)
             closest_idx = cluster_indices[np.argmin(distances)]
             center_token_id = tokens_to_remove[closest_idx]
+            
+            # Add the center token to tokens_to_keep if it's not already there
+            if center_token_id not in updated_tokens_to_keep:
+                updated_tokens_to_keep.append(center_token_id)
+                logger.info(f"Added cluster center token {center_token_id} to tokens_to_keep")
             
             # Map all tokens in this cluster to the center token
             for idx in cluster_indices:
@@ -94,7 +124,7 @@ def cluster_removed_tokens(tokens_to_remove, tokens_to_keep, model, num_clusters
     
     logger.info(f"Created {len(cluster_centers)} cluster representatives for OOV token mapping")
     
-    return oov_lookup
+    return oov_lookup, updated_tokens_to_keep
 
 def setup_frequency_oov_model(task_name, model_name, prune_percent=20, num_clusters=50, param_based=False):
     """
@@ -145,16 +175,23 @@ def setup_frequency_oov_model(task_name, model_name, prune_percent=20, num_clust
     )
     
     # Step 2: Cluster removed tokens
-    oov_lookup = cluster_removed_tokens(tokens_to_remove, tokens_to_keep, model, num_clusters)
+    oov_lookup, updated_tokens_to_keep = cluster_removed_tokens(tokens_to_remove, tokens_to_keep, model, num_clusters)
     
     # Step 3: Create hybrid embeddings
-    logger.info(f"Creating hybrid embeddings for {len(tokens_to_keep)} kept tokens and {len(oov_lookup)} OOV tokens")
-    token_map, reduced_embeddings = create_hybrid_embeddings(tokens_to_keep, oov_lookup, model)
+    logger.info(f"Creating hybrid embeddings for {len(updated_tokens_to_keep)} kept tokens and {len(oov_lookup)} OOV tokens")
+    token_map, reduced_embeddings = create_hybrid_embeddings(updated_tokens_to_keep, oov_lookup, model)
+    
+    # Log embedding size before replacing
+    logger.info(f"Original embedding size: {model.model.embeddings.tok_embeddings.weight.size()}")
+    logger.info(f"Reduced embedding size: {reduced_embeddings.size()}")
     
     # Replace embedding layer with reduced version
     model.model.embeddings.tok_embeddings = nn.Embedding.from_pretrained(
         reduced_embeddings, freeze=False
     )
+    
+    # Verify the embedding size after replacement
+    logger.info(f"New embedding size: {model.model.embeddings.tok_embeddings.weight.size()}")
     
     # Step 4: Wrap the model to handle token remapping during forward pass
     wrapped_model = TokenMappingWrapper(model, token_map, oov_lookup)

@@ -381,18 +381,26 @@ def setup_importance_oov_model(task_name, model_name, prune_percent=20, num_clus
     
     # Cluster removed tokens if there are any tokens to remove
     if tokens_to_remove:
-        oov_lookup = cluster_removed_tokens(tokens_to_remove, tokens_to_keep, model, num_clusters)
+        oov_lookup, updated_tokens_to_keep = cluster_removed_tokens(tokens_to_remove, tokens_to_keep, model, num_clusters)
     else:
         oov_lookup = {}
+        updated_tokens_to_keep = tokens_to_keep
     
     # Create hybrid embeddings with OOV token clustering
-    logger.info(f"Creating hybrid embeddings for {len(tokens_to_keep)} kept tokens and {len(oov_lookup)} OOV tokens")
-    token_map, reduced_embeddings = create_hybrid_embeddings(tokens_to_keep, oov_lookup, model)
+    logger.info(f"Creating hybrid embeddings for {len(updated_tokens_to_keep)} kept tokens and {len(oov_lookup)} OOV tokens")
+    token_map, reduced_embeddings = create_hybrid_embeddings(updated_tokens_to_keep, oov_lookup, model)
+    
+    # Log embedding size before replacing
+    logger.info(f"Original embedding size: {model.model.embeddings.tok_embeddings.weight.size()}")
+    logger.info(f"Reduced embedding size: {reduced_embeddings.size()}")
     
     # Replace embedding layer with reduced version
     model.model.embeddings.tok_embeddings = nn.Embedding.from_pretrained(
         reduced_embeddings, freeze=False
     )
+    
+    # Verify the embedding size after replacement
+    logger.info(f"New embedding size: {model.model.embeddings.tok_embeddings.weight.size()}")
     
     # Wrap model to handle token remapping during forward pass
     wrapped_model = TokenMappingWrapper(model, token_map, oov_lookup)
