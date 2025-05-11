@@ -42,3 +42,5 @@ runs/
 *.out
 *.synctex.gz
 *.toc
+*.bbl
+*.blg
