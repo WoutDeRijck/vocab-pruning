@@ -1,0 +1,5 @@
+,val_loss,val_accuracy,val_runtime,val_samples_per_second,val_steps_per_second,test_accuracy_score,total_param_reduction,embedding_param_reduction,model_only_param_reduction,vocab_reduction,val_f1,test_f1_score,test_precision,test_recall
+mnli,0.9859,0.504,6.0778,1614.9,12.669,0.501,20.02,77.35,0.04,77.35,,,,
+qqp,0.4467,0.7743,22.8382,1770.281,13.836,0.7796,20.03,77.35,0.04,77.35,0.695,0.7026,0.7002,0.7051
+qnli,0.5812,0.6958,3.5357,1545.085,12.162,0.6692,20.03,77.35,0.04,77.35,,,,
+rte,0.6872,0.5162,0.8071,343.198,3.717,0.5663,20.02,77.34,0.04,77.34,,,,

@@ -11,6 +11,7 @@
 \usepackage{arydshln}
 \usepackage{float}
 \usepackage{cite}
+\usepackage{multirow}
 
 \title{\huge \textbf{Words That Matter:\\ Vocabulary Pruning in ModernBERT}}
 \author{Wout De Rijck, Dr. Ir. Karel D'Oosterlinck, \\ Prof. Dr. Ir. Thomas Demeester, Prof. Dr. Ir. Chris Develder}
@@ -97,38 +98,32 @@ For ModernBERT, an encoder-only model, this research examines specific pruning m
 \subsection{Vocabulary Pruning Techniques}
 
 Vocabulary pruning removes rarely used or task-irrelevant tokens to shrink the model's vocabulary (and its embedding matrix). Early work by Abdaoui et al.~\cite{abdaoui2020load} showed that most parameters of multilingual BERT lie in the embedding layer, so trimming unused language tokens can dramatically cut size. In ``Load What You Need,'' they drop languages from mBERT's vocabulary and obtain up to a 45\% reduction in total parameters with comparable accuracy on XNLI.
-\\
-\\
-More recently, Nair et al.~\cite{nair2023blade} proposed BLADE: they prune a bilingual mBERT vocabulary to include only tokens from the query and document languages for cross-lingual IR, then apply a small intermediate pretraining step. This pruned model (keeping only needed embeddings) reduced parameters by $\sim$36.5\% versus full mBERT and sped up training by $\sim$30\% and inference by $\sim$55\%, with minimal loss in retrieval quality. 
-\\
-\\
+
+More recently, Nair et al.~\cite{nair2023blade} proposed \textbf{BLADE}: they prune a bilingual mBERT vocabulary to include only tokens from the query and document languages for cross-lingual IR, then apply a small intermediate pretraining step. This pruned model (keeping only needed embeddings) reduced parameters by $\sim$36.5\% versus full mBERT and sped up training by $\sim$30\% and inference by $\sim$55\%, with minimal loss in retrieval quality.
+
 Dorkin et al.~\cite{dorkin2025estonian} also evaluated pruning for an Estonian adaptation: pruning all tokens unused by Estonian led to no degradation on NER, whereas retraining a new tokenizer hurt performance. These studies consistently find that deleting infrequently seen subwords yields large size savings with little accuracy drop.
 
-\begin{itemize}
-    \item Pruning toolkits: TextPruner~\cite{shen2022textpruner} automates vocabulary pruning: it scans a corpus and removes any tokenizer token not present in the text, deleting its row in the embedding matrix. This simple ``drop unused tokens'' mode can cut model size and speed up training/inference on that domain.
-    \item Sparse expansion models: In sparse-retrieval models like SPLADE, vocabulary pruning is implicit. SPLADE-X~\cite{formal2023spladex} (multi-lingual) restricted output to query-language tokens only, effectively pruning all other vocab. BLADE extends this idea by explicitly building a pruned bilingual model with only the union of query and document subwords, discarding other embeddings entirely.
-    \item Empirical results: Across tasks and languages, pruned-vocabulary models often match full models. For example, after pruning, Nair et al.~\cite{nair2023blade} report retrieval effectiveness on par with larger baselines, while achieving much faster indexing. Dorkin et al.~\cite{dorkin2025estonian} explicitly note ``vocabulary pruning has no observable negative effect on the downstream task'' (Estonian NER). These findings suggest vocabulary pruning is an effective way to tailor large models to specific domains or languages.
-\end{itemize}
+TextPruner by Shen et al.~\cite{shen2022textpruner} automates vocabulary pruning: it scans a corpus and removes any tokenizer token not present in the text, deleting its row in the embedding matrix. This simple ``drop unused tokens'' mode can cut model size and speed up training/inference on that domain.
+
+In sparse-retrieval models like SPLADE, vocabulary pruning is implicit. SPLADE-X~\cite{formal2023spladex} (multi-lingual) restricted output to query-language tokens only, effectively pruning all other vocab. BLADE extends this idea by explicitly building a pruned bilingual model with only the union of query and document subwords, discarding other embeddings entirely.
+
+Across tasks and languages, pruned-vocabulary models often match full models. For example, after pruning, Nair et al.~\cite{nair2023blade} report retrieval effectiveness on par with larger baselines, while achieving much faster indexing. Dorkin et al.~\cite{dorkin2025estonian} explicitly note ``vocabulary pruning has no observable negative effect on the downstream task'' (Estonian NER). These findings suggest vocabulary pruning is an effective way to tailor large models to specific domains or languages.
 
 \subsection{Embedding-Layer Pruning and Compression}
 
-Pruning the embedding layer often means removing or compressing rows (token vectors) to shrink this heavy component. Partial Embedding Matrix Adaptation (PEMA)~\cite{bousquet2023pema} is one systematic approach: they first note that fine-tuning datasets typically use only a small fraction of the full vocabulary. PEMA therefore builds a partial embedding matrix containing only tokens seen in the task data, training on that smaller matrix. This saves GPU memory during fine-tuning without altering task accuracy (unused embeddings are never updated).
+Pruning the embedding layer often means removing or compressing rows (token vectors) to shrink this heavy component. \textbf{Partial Embedding Matrix Adaptation (PEMA)} by Bousquet et al.~\cite{bousquet2023pema} is one systematic approach: they first note that fine-tuning datasets typically use only a small fraction of the full vocabulary. PEMA therefore builds a partial embedding matrix containing only tokens seen in the task data, training on that smaller matrix. This saves GPU memory during fine-tuning without altering task accuracy. After fine-tuning, the updated embeddings are merged back into the full matrix so the model structure remains unchanged. Experiments show large memory reductions: e.g., BERT$_{\text{BASE}}$'s embedding matrix can shrink by $\sim$47\% on average (and RoBERTa by $\sim$52\%) when only task-relevant tokens are kept. Multilingual models see even more savings (mBERT $\sim$44\% embedding reduction, XLM-R $\sim$64\%) because their vocabularies are huge. Crucially, PEMA reports no drop in downstream performance, making it a practical way to prune embeddings during training.
 
-After fine-tuning, the updated embeddings are merged back into the full matrix so the model structure remains unchanged. Experiments show large memory reductions: e.g., BERT$_{\text{BASE}}$'s embedding matrix can shrink by $\sim$47\% on average (and RoBERTa by $\sim$52\%) when only task-relevant tokens are kept. Multilingual models see even more savings (mBERT $\sim$44\% embedding reduction, XLM-R $\sim$64\%) because their vocabularies are huge. Crucially, PEMA reports no drop in downstream performance, making it a practical way to prune embeddings during training.
-\\
-\\
-Another approach is embedding compression via factorization or hashing. Wang et al.~\cite{wang2023lighttoken} propose LightToken, which compresses the entire embedding matrix using low-rank SVD plus a binary residual autoencoder. They note token embeddings are highly redundant (the embedding takes $\sim$21--31\% of BERT/RoBERTa's size). LightToken first applies a rank-$k$ SVD to capture most variation, then learns compact hash codes to reconstruct the residual. In experiments on GLUE, LightToken achieves very high compression (e.g., 25$\times$ smaller embeddings) while preserving accuracy. For BERT$_{\text{BASE}}$, a 25$\times$ embedding compression yields an average GLUE score of 82.9 (baseline 83.0).
+Another approach is \textbf{embedding compression} via factorization or hashing. Wang et al.~\cite{wang2023lighttoken} propose \textbf{LightToken}, which compresses the entire embedding matrix using low-rank SVD plus a binary residual autoencoder. They note token embeddings are highly redundant (the embedding takes $\sim$21--31\% of BERT/RoBERTa's size). LightToken first applies a rank-$k$ SVD to capture most variation, then learns compact hash codes to reconstruct the residual. In experiments on GLUE, LightToken achieves very high compression (e.g., 25$\times$ smaller embeddings) while preserving accuracy. For BERT$_{\text{BASE}}$, a 25$\times$ embedding compression yields an average GLUE score of 82.9 (baseline 83.0).
 
-Thus, LightToken and similar methods show that even structured low-rank or quantized pruning of embeddings can yield massive space savings with minimal impact on performance. 
-\\
-\\
+These methods show that even structured low-rank or quantized pruning of embeddings can yield massive space savings with minimal impact on performance.
+
 Overall, embedding-layer pruning techniques exploit the fact that many token vectors (especially for rare subwords) contribute little to end-task accuracy. By either dropping unused rows (PEMA/TextPruner) or factoring and quantizing embeddings (LightToken), these methods reduce the $\sim$25--50\% of model parameters in the embedding matrix, enabling lighter models in practice.
 
-\subsection{Encoder-Layer Pruning}
+\subsection{Encoder-Layer Pruning (Auxiliary Methods)}
 
-Although our focus is vocab/embedding pruning, many complementary pruning methods work at the encoder layers. A classic example is attention-head pruning: Michel et al.~\cite{michel2019heads} discovered that ``a large percentage of attention heads can be removed at test time without significantly impacting performance''. Voita et al.~\cite{voita2019heads} likewise pruned 38 of 48 encoder heads in an NMT transformer (removing $\sim$79\% of heads) with only a 0.15 BLEU loss.
+Although our focus is vocab/embedding pruning, many complementary pruning methods work at the encoder layers. A classic example is \textbf{attention-head pruning}: Michel et al.~\cite{michel2019sixteen} discovered that a large percentage of attention heads can be removed at test time without significantly impacting performance. Voita et al.~\cite{voita2019analyzing} likewise pruned 38 of 48 encoder heads in an NMT transformer (removing $\sim$79\% of heads) with only a 0.15 BLEU loss.
 
-In practice, toolkit frameworks (like TextPruner) often support head and FFN pruning alongside vocab pruning. Other methods include movement pruning~\cite{sanh2020movement} that gradually zeros out small weights during fine-tuning, or LayerDrop~\cite{fan2020layerdrop} which stochastically drops whole layers during training. These encoder-level techniques are orthogonal to vocab pruning: they further thin out the model by removing redundant heads, neurons, or weight components, whereas vocabulary pruning targets the input/output embedding parameters.
+In practice, toolkit frameworks (like TextPruner) often support head and FFN pruning alongside vocab pruning. Other methods include \textit{movement pruning}~\cite{sanh2020movement} that gradually zeros out small weights during fine-tuning, or \textit{LayerDrop}~\cite{fan2020layerdrop} which stochastically drops whole layers during training.
 
 \section{Method}
 
@@ -220,64 +215,75 @@ Experimental results indicate that TF-IDF variants generally outperform pure fre
 
 \newpage
 \section{Experiments}
+% \begin{itemize}
+%     \item Multiple pruning percentages (mrpc, mnli, sst2)
+%     \item LoSparse + Vocab pruning combined (mrpc, mnli, sst2)
+% \end{itemize}
+This section evaluates the proposed vocabulary pruning method on the GLUE benchmark, both in isolation and in combination with structured encoder-layer pruning (LoSparse), in order to assess effectiveness across a variety of downstream tasks. The experiments are designed to address the following questions:
 
-\begin{table*}[ht!]
+\begin{enumerate}
+    \item Impact of pure vocabulary pruning: How does performance vary at different pruning ratios?
+    \item Comparison of pruning strategies: Does the TF-IDF + OOV hybrid approach outperform simpler baselines (e.g., frequency-based, random selection, clustering, attention-based)?
+    \item Interaction with encoder sparsification: What synergistic effects arise when combining embedding-level pruning with encoder-layer sparsification in ModernBERT?
+\end{enumerate}
+
+\subsection{Datasets and Metrics}
+Eight GLUE development tasks are employed: SST-2, MRPC, MNLI, CoLA, STS-B, QQP, QNLI, and RTE. Classification tasks report accuracy; MRPC additionally reports F1, CoLA reports Matthew correlation coefficient, and STS-B reports Pearson correlation.
+
+\subsection{Baselines and Pruning Methods}
+The following configurations are compared:
+
+\begin{itemize}
+    \item ModernBERT (Full): No pruning.
+    \item Train Tokens Only: Removal of embeddings not observed in fine-tuning data.
+    \item Random Selection: Uniform removal of embeddings.
+    \item Clustering-Based: Retention of one centroid token per semantic cluster.
+    \item Frequency-Based: Pruning of lowest-frequency tokens.
+    \item Attention-Based: Removal of tokens with lowest aggregated attention weights.
+    \item TF-IDF Based: Pruning according to L2-normalized TF-IDF scores.
+    \item Frequency + OOV: Hybrid schemes that remap pruned tokens via clustering representatives.
+    \item TF-IDF + OOV: Hybrid schemes that remap pruned tokens via clustering representatives.
+    \item LoSparse (20\% encoder pruning): Structured encoder-layer pruning only.
+    \item LoSparse + TF-IDF + OOV: Joint embedding and encoder pruning.
+\end{itemize}
+
+\begin{table*}[h]
 \centering
-\small
+\scriptsize
 \caption{Comparison of vocabulary pruning techniques on GLUE benchmark tasks. Results show accuracy on the development set with varying pruning methods. Best results for each task are highlighted in \textbf{bold}.}
 \label{tab:results}
-\setlength{\tabcolsep}{6pt}
-\begin{tabular}{lcccccccc|c}
+\setlength{\tabcolsep}{2.8pt}
+\begin{tabular}{lcccc|cc|cc|cc|cc|c}
 \toprule
-\textbf{Method} & \textbf{SST-2} & \textbf{MRPC} & \textbf{MNLI} & \textbf{CoLA} & \textbf{STS-B} & \textbf{QQP} & \textbf{QNLI} & \textbf{RTE} & \textbf{AVG} \\
+\textbf{Method} & \textbf{SST-2} & \textbf{MRPC} & \textbf{CoLA} & \textbf{STS-B} & \multicolumn{2}{c|}{\textbf{MNLI}} & \multicolumn{2}{c|}{\textbf{QQP}} & \multicolumn{2}{c|}{\textbf{QNLI}} & \multicolumn{2}{c|}{\textbf{RTE}} & \textbf{AVG} \\
 \midrule
-\multicolumn{9}{l|}{\textit{Baseline}} \\
-ModernBERT (Full) & 0.951 & 0.856 & 0.881 & 0.586 & 0.917 & 0.917 & 0.916 & 0.598 & 0.828 \\
+\multicolumn{14}{l}{\textit{Baseline}} \\
+ModernBERT (Full) & 0.951 & 0.856 & 0.586 & 0.917 & \multicolumn{2}{c|}{0.881} & \multicolumn{2}{c|}{0.917} & \multicolumn{2}{c|}{0.939} & \multicolumn{2}{c|}{0.598} & 0.831 \\
 \midrule
-\multicolumn{9}{l|}{\textit{Vocabulary Pruning}} \\
-Parameter Reduction & 18.85\% & 18.56\% & 6.74\% & 22.61\% & 18.76\% & 4.79\% & 6.42\% & 17.06\% &  \\
-Train Tokens Only & 0.950 & 0.831 & 0.883 & 0.509 & 0.917 & 0.917 & 0.915 & 0.598 & 0.815 \\
+\multicolumn{14}{l}{\textit{Vocabulary Pruning}} \\
+Parameter Reduction & 18.85\% & 18.56\% & 22.61\% & 18.76\% & \multicolumn{2}{c|}{6.74\%} & \multicolumn{2}{c|}{4.79\%} & \multicolumn{2}{c|}{6.42\%} & \multicolumn{2}{c|}{17.06\%} & \\
+Train Tokens Only & 0.950 & 0.831 & 0.509 & 0.917 & \multicolumn{2}{c|}{0.883} & \multicolumn{2}{c|}{0.917} & \multicolumn{2}{c|}{0.915} & \multicolumn{2}{c|}{0.598} & 0.815 \\
 \midrule
-Parameter Reduction & 20.25\% & 20.02\% & 10.57\% & 23.27\% & 20.18\% & 9.01\% & 10.31\% & 18.83\% & \\
-Random Selection & 0.911 & 0.798 & 0.832 & 0.470 & 0.845 & 0.902 & 0.895 & 0.522 & 0.772 \\
-Clustering-Based & 0.899 & 0.714 & 0.712 & 0.000 & 0.786 & 0.875 & 0.836 & 0.510 & 0.667 \\
-Frequency-Based & 0.943 & 0.812 & 0.880 & 0.467 & \textbf{0.905} & \textbf{0.916} & \textbf{0.920} & 0.542 & 0.798 \\
-Attention-Based & \textbf{0.947} & \textbf{0.864} & 0.864 & \textbf{0.589} & 0.885 & 0.912 & 0.912 & 0.550 & 0.803 \\
-TF-IDF Based & 0.933 & 0.807 & \textbf{0.875} & 0.520 & 0.901 & 0.900 & 0.917 & \textbf{0.606} & \textbf{0.807} \\
+Parameter Reduction & 20.25\% & 20.02\% & 23.27\% & 20.18\% & 10.57\% & 20.02\% & 9.01\% & 20.02\% & 10.31\% & 20.02\% & 18.83\% & 20.02\% & \\
+Random Selection & 0.911 & 0.798 & 0.470 & 0.845 & 0.832 & 0.504 & 0.902 & 0.780 & 0.895 & 0.669 & 0.522 & 0.566 & 0.772 \\
+Clustering-Based & 0.899 & 0.714 & 0.000 & 0.786 & 0.712 & 0.501 & 0.875 & 0.774 & 0.836 & 0.510 & 0.510 & 0.566 & 0.667 \\
+Frequency-Based & 0.943 & 0.812 & 0.467 & \textbf{0.905} & 0.880 & 0.858 & \textbf{0.916} & \textbf{0.904} & \textbf{0.920} & \textbf{0.902} & 0.542 & 0.546 & 0.798 \\
+Attention-Based & \textbf{0.947} & \textbf{0.864} & 0.589 & 0.885 & 0.864 & - & 0.912 & - & 0.912 & - & 0.550 & - & 0.803 \\
+TF-IDF Based & 0.933 & 0.807 & 0.520 & 0.901 & 0.875 & 0.860 & 0.900 & 0.898 & 0.917 & 0.909 & 0.606 & \textbf{0.574} & 0.807 \\
+\\ [-6pt]
+\cdashline{1-14}
+\\[-6pt]
+Freq + OOV & 0.938 & 0.828 & 0.540 & 0.906 & \textbf{0.881} & - & \textbf{0.916} & - & 0.918 & - & 0.538 & - & 0.808 \\
+TF-IDF + OOV & 0.923 & 0.834 & \textbf{0.615} & 0.903 & 0.878 & - & 0.906 & - & 0.919 & - & 0.554 & - & \textbf{0.817} \\
 \\ [-8pt]
-\cdashline{1-10}
-\\[-8pt]
-Freq + OOV & \textbf{0.938} & 0.828 & \textbf{0.881} & 0.540 & 0.906 & 0.916 & 0.918 & 0.538 & 0.808 \\
-TF-IDF + OOV & 0.923 & 0.834 & 0.878 & 0.615 & 0.903 & 0.906 & 0.919 & 0.554 & \textbf{0.817} \\
-\\ [-8pt]
-\cdashline{1-10}
-\\[-8pt]
-\multicolumn{9}{l|}{\textit{Encoder Layer Pruning}} \\
-Parameter Reduction & 20.16\% & 20.16\% & 20.16\% & 20.16\% & 20.16\% & 20.16\% & 20.16\% & 20.16\% & \\
-LoSparse & 0.929 & 0.856 & 0.858 & - & - & - & - & - & - \\
+\cdashline{1-14}
+\\[-6pt]
+\multicolumn{14}{l}{\textit{Encoder Layer Pruning}} \\
+Parameter Reduction & 20.16\% & 20.16\% & 20.16\% & 20.16\% & \multicolumn{2}{c|}{20.16\%} & \multicolumn{2}{c|}{20.16\%} & \multicolumn{2}{c|}{20.16\%} & \multicolumn{2}{c|}{20.16\%} & \\
+LoSparse & 0.929 & 0.856 & 0.316 & 0.882 & \multicolumn{2}{c|}{0.858} & \multicolumn{2}{c|}{0.911} & \multicolumn{2}{c|}{0.907} & \multicolumn{2}{c|}{\textbf{0.610}} & 0.784 \\
 \bottomrule
 \end{tabular}
 \end{table*}
-
-\begin{table}[ht!]
-\centering
-\caption{Average performance change across GLUE tasks with different pruning methods.}
-\label{tab:avg_performance}
-\begin{tabular}{lcc}
-\toprule
-\textbf{Method} & \textbf{Avg. Param. Reduction} & \textbf{Avg. Performance Drop} \\
-\midrule
-Train Tokens Only & 14.22\% & 1.25\% \\
-Random Selection & 16.44\% & 5.58\% \\
-Clustering-Based & 16.44\% & 16.24\% \\
-Frequency-Based & 16.44\% & 2.32\% \\
-Attention-Based & 15.92\% & 1.99\% \\
-TF-IDF Based & 16.44\% & 2.04\% \\
-Frequency + OOV & 16.40\% & 1.82\% \\
-TF-IDF + OOV & 16.40\% & 0.96\% \\
-\bottomrule
-\end{tabular}
-\end{table}
 
 \newpage
 \bibliographystyle{plain}
