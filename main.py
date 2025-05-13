@@ -299,6 +299,11 @@ def evaluate_test_set(model, test_dataset, task_name, data_collator, batch_size,
         # Extract the predictions from the first element of the tuple
         predictions = prediction_output[0]
         
+        # Check if predictions is a tuple and extract the appropriate component if needed
+        if isinstance(predictions, tuple):
+            logger.info("Predictions is a tuple, extracting first element")
+            predictions = predictions[0]
+        
         # For classification tasks, get the class with highest probability
         if len(predictions.shape) > 1 and predictions.shape[1] > 1:
             predictions = np.argmax(predictions, axis=1)

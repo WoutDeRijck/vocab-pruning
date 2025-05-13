@@ -181,6 +181,11 @@ def generate_test_predictions(model, test_dataset, data_collator, args, tokenize
             # prediction_output is a tuple containing (predictions, label_ids, metrics)
             predictions = prediction_output[0]
             
+            # Check if predictions is a tuple and extract the appropriate component if needed
+            if isinstance(predictions, tuple):
+                logger.info("Predictions is a tuple, extracting first element")
+                predictions = predictions[0]
+            
             # For classification tasks, get the class with highest probability
             if len(predictions.shape) > 1 and predictions.shape[1] > 1:
                 predictions = np.argmax(predictions, axis=1)
