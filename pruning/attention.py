@@ -325,7 +325,7 @@ def setup_attention_based_model(task_name, model_name, attention_model=None, pru
     
     # Load the base model for pruning
     model = AutoModelForSequenceClassification.from_pretrained(
-        model_name, num_labels=task.n_labels, cache_dir=None
+        model_name, num_labels=task["n_labels"], cache_dir=None
     )
     
     # Get total parameters and embedding dimension for parameter-based pruning
@@ -351,7 +351,7 @@ def setup_attention_based_model(task_name, model_name, attention_model=None, pru
     # Create a reduced embedding layer
     model = replace_embeddings(model, tokens_to_keep)
     
-    return model 
+    return model, dict(zip(tokens_to_keep, range(len(tokens_to_keep)))), None
 
 # Function to create reduced embeddings from tokens_to_keep
 def replace_embeddings(model, tokens_to_keep):

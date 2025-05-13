@@ -294,7 +294,10 @@ def evaluate_test_set(model, test_dataset, task_name, data_collator, batch_size,
     if trainer is not None:
         logger.info("Using Trainer.predict() for consistent processing")
         prediction_output = trainer.predict(test_dataset)
-        predictions = prediction_output.predictions
+        
+        # prediction_output is a tuple containing (predictions, label_ids, metrics)
+        # Extract the predictions from the first element of the tuple
+        predictions = prediction_output[0]
         
         # For classification tasks, get the class with highest probability
         if len(predictions.shape) > 1 and predictions.shape[1] > 1:

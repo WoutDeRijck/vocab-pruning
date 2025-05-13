@@ -48,8 +48,7 @@ def setup_training(model, train_dataset, eval_dataset, task_name, args, tokenize
         weight_decay=args.weight_decay,
         logging_strategy="epoch",
         eval_strategy="epoch",
-        save_strategy="epoch",
-        load_best_model_at_end=True,
+        save_strategy="no",
         bf16=torch.cuda.is_available(),  # Use bfloat16 if available
         bf16_full_eval=torch.cuda.is_available(),
         push_to_hub=False,
@@ -178,7 +177,9 @@ def generate_test_predictions(model, test_dataset, data_collator, args, tokenize
         if trainer is not None:
             logger.info("Using Trainer.predict() for consistent processing")
             prediction_output = trainer.predict(test_dataset)
-            predictions = prediction_output.predictions
+            
+            # prediction_output is a tuple containing (predictions, label_ids, metrics)
+            predictions = prediction_output[0]
             
             # For classification tasks, get the class with highest probability
             if len(predictions.shape) > 1 and predictions.shape[1] > 1:
