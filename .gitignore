@@ -44,3 +44,5 @@ runs/
 *.toc
 *.bbl
 *.blg
+
+results/*

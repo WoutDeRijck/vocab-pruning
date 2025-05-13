@@ -1,6 +1,0 @@
-
-,val_loss,val_accuracy,val_runtime,val_samples_per_second,val_steps_per_second,test_accuracy_score,test_size,test_tokens,test_reduction,test_eval_loss,test_eval_accuracy,test_eval_runtime,test_eval_samples_per_second,test_eval_steps_per_second,test_epoch,test_percent,test_loss,test_accuracy,test_runtime,test_samples_per_second,test_steps_per_second,total_param_reduction,embedding_param_reduction,model_only_param_reduction,vocab_reduction,val_f1,test_f1_score,test_precision,test_recall
-mnli,0.7352,0.6848,6.356,1544.214,12.115,0.6827,50368.0,11410.0,77.35,0.7352,0.6848,6.356,1544.214,12.115,2.0,20.0,0.7352,0.6848,6.356,1544.214,12.115,20.02,77.35,0.04,77.35,,,,
-qqp,0.4681,0.7579,22.707,1780.505,13.916,0.7627,,,,,,,,,,,,,,,,20.03,77.35,0.04,77.35,0.6734,0.6803,0.677,0.6837
-qnli,0.4334,0.7974,3.7762,1446.703,11.387,0.7908,,,,,,,,,,,,,,,,20.03,77.35,0.04,77.35,,,,
-rte,0.6777,0.6209,1.0229,270.788,2.933,0.5783,,,,,,,,,,,,,,,,20.02,77.34,0.04,77.34,,,,
