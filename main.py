@@ -289,131 +289,102 @@ def evaluate_test_set(model, test_dataset, task_name, data_collator, batch_size,
         Dictionary of metrics
     """
     logger.info("Generating predictions on test set")
-    
-    # If trainer is provided, use it for predictions to ensure consistent processing
-    if trainer is not None:
-        logger.info("Using Trainer.predict() for consistent processing")
-        prediction_output = trainer.predict(test_dataset)
-        
-        # prediction_output is a tuple containing (predictions, label_ids, metrics)
-        # Extract the predictions from the first element of the tuple
-        predictions = prediction_output[0]
-        
-        # Check if predictions is a tuple and extract the appropriate component if needed
-        if isinstance(predictions, tuple):
-            logger.info("Predictions is a tuple, extracting first element")
-            predictions = predictions[0]
-        
-        # For classification tasks, get the class with highest probability
-        if len(predictions.shape) > 1 and predictions.shape[1] > 1:
-            predictions = np.argmax(predictions, axis=1)
-        else:
-            # For regression tasks
-            predictions = predictions.squeeze()
-    else:
-        # Fall back to manual processing if no trainer is provided
-        with torch.no_grad():
-            device = next(model.parameters()).device
-            predictions = []
-            
-            # Special handling for no_pruning with DataCollatorWithPadding
-            if pruning_method == "no_pruning" and tokenizer is not None:
-                logger.info("Using custom dataloader for no_pruning with standard tokenizer")
-                try:
-                    # Process one example at a time - safest approach
-                    logger.info("Processing examples individually")
-                    for i in tqdm(range(len(test_dataset)), desc="Predicting"):
-                        example = test_dataset[i]
-                        
-                        # Extract input_ids and attention_mask, ensuring they're tensors
-                        if isinstance(example['input_ids'], torch.Tensor):
-                            input_ids = example['input_ids'].unsqueeze(0).to(device)  # Add batch dimension
-                        else:
-                            # Convert to tensor if it's a list or other type
-                            input_ids = torch.tensor([example['input_ids']], dtype=torch.long).to(device)
-                        
-                        if isinstance(example['attention_mask'], torch.Tensor):
-                            attention_mask = example['attention_mask'].unsqueeze(0).to(device)
-                        else:
-                            attention_mask = torch.tensor([example['attention_mask']], dtype=torch.long).to(device)
-                        
-                        # Forward pass
-                        outputs = model(input_ids=input_ids, attention_mask=attention_mask)
-                        logits = outputs.logits
-                        predictions.append(logits.cpu().numpy())
-                except Exception as e:
-                    logger.error(f"Error processing examples: {e}")
-                    logger.error(traceback.format_exc())
-                    return {}
-            else:
-                # Process in batches using the provided collator
-                dataloader = torch.utils.data.DataLoader(
-                    test_dataset, batch_size=batch_size,
-                    collate_fn=data_collator
-                )
-                
-                for batch in tqdm(dataloader, desc="Predicting"):
-                    # Filter out non-tensor values and labels
-                    batch_inputs = {k: v.to(device) for k, v in batch.items() 
-                               if k != 'labels' and k != 'prediction_only' and hasattr(v, 'to')}
-                    
-                    with torch.no_grad():
-                        outputs = model(**batch_inputs)
-                    logits = outputs.logits
-                    predictions.append(logits.cpu().numpy())
-            
-            # Concatenate predictions
-            all_predictions = np.vstack(predictions)
-            
-            # For classification tasks, get the class with highest probability
-            if len(all_predictions.shape) > 1 and all_predictions.shape[1] > 1:
-                predictions = np.argmax(all_predictions, axis=1)
-            else:
-                # For regression tasks
-                predictions = all_predictions.squeeze()
-    
-    # Save predictions to file
-    output_test_file = f"{model.config._name_or_path.replace('/', '_')}_{task_name}_predictions.txt"
-    np.savetxt(output_test_file, predictions, fmt='%d' if len(predictions.shape) == 1 else '%.6f')
-    logger.info(f"Saved test predictions to {output_test_file}")
-    
-    # Get the true labels from the test dataset
-    true_labels = test_dataset['labels']
-    
-    # Calculate test metrics
-    logger.info("\n=== Test Set Evaluation Results ===")
-    
-    task_key = "mnli-matched" if task_name == "mnli" else task_name
-    task_meta = glue_tasks[task_key]
-    
     metrics_dict = {}
     
-    for metric_func in task_meta["metric_funcs"]:
-        metric_name = metric_func.__name__
-        
-        # Special handling for correlation metrics which return a tuple
-        if metric_name in ['pearsonr', 'spearmanr']:
-            result, p_value = metric_func(true_labels, predictions)
-            logger.info(f"{metric_name}: {result:.4f}")
-            metrics_dict[metric_name] = result
-        # Special handling for F1 which needs additional arguments for binary classification
-        elif metric_name == 'f1_score' and task_name in ['mrpc', 'qqp']:
-            result = metric_func(true_labels, predictions, average='binary')
-            logger.info(f"{metric_name}: {result:.4f}")
-            metrics_dict[metric_name] = result
-        else:
-            result = metric_func(true_labels, predictions)
-            logger.info(f"{metric_name}: {result:.4f}")
-            metrics_dict[metric_name] = result
-    
-    # For MRPC or QQP, also calculate precision and recall
-    if task_name in ['mrpc', 'qqp']:
-        precision = precision_score(true_labels, predictions)
-        recall = recall_score(true_labels, predictions)
-        logger.info(f"precision: {precision:.4f}")
-        logger.info(f"recall: {recall:.4f}")
-        metrics_dict['precision'] = precision
-        metrics_dict['recall'] = recall
+    # If trainer is provided, try to use it for making predictions
+    if trainer is not None:
+        logger.info("Using Trainer.predict() for consistent processing")
+        try:
+            # Let's use model.eval() to ensure we're in evaluation mode
+            model.eval()
+            
+            # Create a DataLoader that matches the test_dataset exactly
+            dataloader = torch.utils.data.DataLoader(
+                test_dataset, 
+                batch_size=batch_size,
+                collate_fn=data_collator,
+                shuffle=False  # Important to maintain order
+            )
+            
+            all_predictions = []
+            device = next(model.parameters()).device
+            
+            # Manual prediction loop to ensure we get predictions for all examples
+            with torch.no_grad():
+                for batch in dataloader:
+                    # Filter out non-tensor values and labels
+                    batch_inputs = {k: v.to(device) for k, v in batch.items()
+                                  if k != 'labels' and hasattr(v, 'to')}
+                    
+                    outputs = model(**batch_inputs)
+                    logits = outputs.logits
+                    
+                    # For classification tasks, get the class with highest probability
+                    if len(logits.shape) > 1 and logits.shape[1] > 1:
+                        batch_preds = torch.argmax(logits, dim=1).cpu().numpy()
+                    else:
+                        # For regression tasks
+                        batch_preds = logits.cpu().squeeze().numpy()
+                        
+                    # Add batch predictions
+                    all_predictions.extend(batch_preds)
+            
+            # Convert to numpy array
+            predictions = np.array(all_predictions)
+            
+            # Save predictions to file
+            output_test_file = f"{model.config._name_or_path.replace('/', '_')}_{task_name}_predictions.txt"
+            np.savetxt(output_test_file, predictions, fmt='%d' if len(predictions.shape) == 1 else '%.6f')
+            logger.info(f"Saved test predictions to {output_test_file}")
+            
+            # Get true labels
+            true_labels = np.array([example['labels'] for example in test_dataset])
+            
+            # Verify we have correct number of predictions
+            if len(predictions) == len(true_labels):
+                # Calculate test metrics
+                logger.info("\n=== Test Set Evaluation Results ===")
+                
+                task_key = "mnli-matched" if task_name == "mnli" else task_name
+                task_meta = glue_tasks[task_key]
+                
+                for metric_func in task_meta["metric_funcs"]:
+                    metric_name = metric_func.__name__
+                    
+                    # Special handling for correlation metrics which return a tuple
+                    if metric_name in ['pearsonr', 'spearmanr']:
+                        result, p_value = metric_func(true_labels, predictions)
+                        logger.info(f"{metric_name}: {result:.4f}")
+                        metrics_dict[metric_name] = result
+                    # Special handling for F1 which needs additional arguments for binary classification
+                    elif metric_name == 'f1_score' and task_name in ['mrpc', 'qqp']:
+                        result = metric_func(true_labels, predictions, average='binary')
+                        logger.info(f"{metric_name}: {result:.4f}")
+                        metrics_dict[metric_name] = result
+                    else:
+                        result = metric_func(true_labels, predictions)
+                        logger.info(f"{metric_name}: {result:.4f}")
+                        metrics_dict[metric_name] = result
+                
+                # For MRPC or QQP, also calculate precision and recall
+                if task_name in ['mrpc', 'qqp']:
+                    precision = precision_score(true_labels, predictions)
+                    recall = recall_score(true_labels, predictions)
+                    logger.info(f"precision: {precision:.4f}")
+                    logger.info(f"recall: {recall:.4f}")
+                    metrics_dict['precision'] = precision
+                    metrics_dict['recall'] = recall
+            else:
+                logger.error(f"Mismatch in sample count: predictions={len(predictions)}, labels={len(true_labels)}")
+                metrics_dict = {
+                    "error": "prediction_mismatch",
+                    "predictions_length": len(predictions),
+                    "labels_length": len(true_labels)
+                }
+        except Exception as e:
+            logger.error(f"Error in prediction and evaluation: {e}")
+            logger.error(traceback.format_exc())
+            metrics_dict = {"error": str(e)}
     
     return metrics_dict
 
