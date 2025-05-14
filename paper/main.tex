@@ -40,7 +40,7 @@
 % an improvement on performance, interpretability, etc.
 
 \begin{abstract}
-Large language models like ModernBERT deliver impressive performance but face a critical deployment challenge: their substantial computational and memory demands restrict their use in resource-constrained environments. While various pruning techniques exist to address this bottleneck, most require expensive post-pruning fine-tuning—creating a paradoxical situation where model optimization itself demands significant resources. This paper introduces a novel vocabulary pruning approach for ModernBERT that eliminates the need for post-pruning recovery fine-tuning, delivering superior efficiency particularly at smaller pruning ratios (5-20\%). The proposed technique specifically targets the embedding layer—which constitutes 25.95\% of the model's parameters but remains surprisingly underexplored in compression research—through systematic token importance analysis based on TF-IDF with specialized out-of-vocabulary (OOV) token handling. Experiments on the GLUE benchmark demonstrate that vocabulary pruning alone achieves 20-23\% parameter reduction while maintaining 99.2\% of the original performance, outperforming encoder-based pruning methods at these ratios. 
+Large language models like ModernBERT deliver impressive performance but face a critical deployment challenge: their substantial computational and memory demands restrict their use in resource-constrained environments. While various pruning techniques exist to address this bottleneck, most require expensive post-pruning fine-tuning—creating a paradoxical situation where model optimization itself demands significant resources. This paper introduces a novel vocabulary pruning approach for ModernBERT that eliminates the need for post-pruning recovery fine-tuning, delivering superior efficiency particularly at smaller pruning ratios (5-20\%). The proposed technique specifically targets the embedding layer—which constitutes 25.95\% of the model's parameters but remains surprisingly underexplored in compression research—through systematic token importance analysis based on TF-IDF with specialized out-of-vocabulary (OOV) token handling. Experiments on the GLUE benchmark demonstrate that vocabulary pruning alone achieves 20-23\% parameter reduction while maintaining 97.6\% of the original performance, outperforming encoder-based pruning methods at these ratios. 
 Benchmark measurements confirm practical benefits: 20\% reduction in storage size, about 15\% reduction in GPU memory, and no impact on inference time. This work establishes an efficient pathway for creating lightweight, task-specific transformer models through offline pre-fine-tuning optimizations rather than computationally expensive retraining.
 \end{abstract}
 
@@ -344,7 +344,7 @@ All experiments were conducted on an NVIDIA RTX 4090 GPU. The vocabulary pruning
 \subsection{Results}
 Table \ref{tab:results} presents the comprehensive evaluation across all GLUE tasks for the different pruning methods. Several key findings emerge:
 \\ \\
-First, vocabulary pruning alone achieves substantial parameter reduction (20.02-23.27\%) with minimal performance impact. The TF-IDF + OOV approach performs exceptionally well, maintaining 99.2\% of the original model's average performance while reducing parameters by over 20\%.
+First, vocabulary pruning alone achieves substantial parameter reduction (20.02-23.27\%) with minimal performance impact. The TF-IDF + OOV approach performs exceptionally well, maintaining 97.6\% of the original model's average performance while reducing parameters by over 20\%.
 \\ \\
 Second, the inclusion of OOV handling mechanisms significantly improves results compared to their non-OOV counterparts. For instance, TF-IDF + OOV outperforms standard TF-IDF by 2.4 percentage points on average, with particularly strong improvements on CoLA (9.5 points) and RTE (6.1 points).
 \\ \\
@@ -359,7 +359,7 @@ The benchmark results in Table \ref{tab:benchmark_results} further quantify the 
 
 \section{Conclusion}
 
-% This paper introduced a novel vocabulary pruning approach for transformer-based language models that eliminates the need for post-pruning recovery fine-tuning while delivering substantial parameter reduction with minimal performance impact. The work highlights the embedding layer as a critical yet often overlooked component for model compression, demonstrating that intelligent token selection can maintain 99.2\% of original model performance while reducing total parameters by 20-23\%.
+% This paper introduced a novel vocabulary pruning approach for transformer-based language models that eliminates the need for post-pruning recovery fine-tuning while delivering substantial parameter reduction with minimal performance impact. The work highlights the embedding layer as a critical yet often overlooked component for model compression, demonstrating that intelligent token selection can maintain 97.6\% of original model performance while reducing total parameters by 20-23\%.
 
 % The key contributions of this research are:
 

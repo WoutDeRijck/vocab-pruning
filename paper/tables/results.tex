@@ -9,7 +9,7 @@
 \textbf{Method} & \textbf{SST-2} & \textbf{CoLA} & \textbf{MRPC} & \textbf{STS-B} & \textbf{QQP} & \textbf{MNLI} & \textbf{QNLI} & \textbf{RTE} & \textbf{AVG} \\
 \midrule
 \multicolumn{10}{l}{\textbf{Baseline}} \\
-ModernBERT (Full) & 0.951 & 0.616 & 0.89 & 0.917 & 0.917 & 0.881 & 0.939 & 0.643 & 0.831 \\
+ModernBERT (Full) & 0.951 & 0.616 & 0.89 & 0.917 & 0.917 & 0.881 & 0.939 & 0.643 & 0.844 \\
 \midrule
 \multicolumn{10}{l}{\textbf{Encoder Layer Pruning}} \\
 LoSparse & 0.929 & 0.316 & 0.856 & 0.882 & 0.911 & 0.858 & 0.907 & 0.610 & 0.784 \\
@@ -30,7 +30,7 @@ TF-IDF + OOV & 0.923 & \textbf{0.615} & 0.834 & 0.903 & 0.912 & 0.858 & 0.908 & 
 \\ [-6pt]
 \hdashline
 \\[-6pt]
-Train Tokens Only & 0.950 & 0.630 & 0.861 & 0.917 & 0.917 & 0.883 & 0.915 & 0.639 & 0.815 \\
+Train Tokens Only & 0.950 & 0.630 & 0.861 & 0.917 & 0.917 & 0.883 & 0.915 & 0.639 & 0.839 \\
 \textit{Parameter Reduction} & \textit{18.85\%} & \textit{22.61\%} & \textit{18.56\%} & \textit{18.76\%} & \textit{4.79\%} & \textit{6.74\%} & \textit{6.42\%} & \textit{17.06\%} & \\
 \bottomrule
 \end{tabular}
