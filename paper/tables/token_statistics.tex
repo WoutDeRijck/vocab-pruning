@@ -1,0 +1,22 @@
+\begin{table*}[htbp]
+\centering
+\scriptsize
+\setlength{\tabcolsep}{3.5pt}
+\begin{tabular}{l|cc|cc|cc|cc|cc}
+\toprule
+& \multicolumn{2}{c|}{\textbf{Total Tokens}} & \multicolumn{2}{c|}{\textbf{Unique Tokens}} & \multicolumn{2}{c|}{\textbf{Vocab Coverage (\%)}} & \multicolumn{2}{c|}{\textbf{Top 20\% Coverage (\%)}} & \multicolumn{2}{c}{\textbf{TF-IDF/Freq Overlap (\%)}} \\
+\textbf{Task} & \textbf{Train} & \textbf{Test} & \textbf{Train} & \textbf{Test} & \textbf{Train} & \textbf{Test} & \textbf{Train} & \textbf{Test} & \textbf{Train} & \textbf{Test} \\
+\midrule
+COLA & 71,818 & 7,939 & 5,416 & 1,934 & 17.74 & 6.34 & 85.12 & 74.68 & 58.36 & 51.04 \\
+MNLI & 13,044,457 & 1,452,279 & 25,793 & 22,664 & 84.51 & 74.25 & 90.69 & 89.64 & 38.41 & 61.08 \\
+MRPC & 165,585 & 18,701 & 11,096 & 3,567 & 36.35 & 11.69 & 83.17 & 71.80 & 57.91 & 54.56 \\
+QNLI & 4,388,343 & 485,747 & 26,176 & 20,360 & 85.76 & 66.71 & 88.31 & 85.79 & 33.41 & 55.33 \\
+QQP & 9,036,384 & 1,000,855 & 25,486 & 18,534 & 83.50 & 60.72 & 94.02 & 91.79 & 32.39 & 61.20 \\
+RTE & 151,109 & 16,215 & 13,354 & 4,198 & 43.75 & 13.75 & 81.77 & 70.75 & 57.49 & 54.71 \\
+SST2 & 686,566 & 75,775 & 11,536 & 8,084 & 37.80 & 26.49 & 84.23 & 80.53 & 59.08 & 57.74 \\
+STSB & 128,151 & 14,481 & 10,346 & 3,271 & 33.90 & 10.72 & 82.66 & 71.30 & 60.22 & 49.54 \\
+\bottomrule
+\end{tabular}
+\caption{Token statistics across GLUE tasks, comparing train and test splits.}
+\label{tab:token_statistics}
+\end{table*} 

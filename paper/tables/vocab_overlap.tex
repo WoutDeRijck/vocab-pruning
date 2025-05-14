@@ -1,0 +1,22 @@
+\begin{table}[htbp]
+\centering
+\scriptsize
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{l|cc}
+\toprule
+& \multicolumn{2}{c}{\textbf{Test Vocabulary Coverage}} \\
+\textbf{Task} & \textbf{OOV Tokens} & \textbf{OOV\%} \\
+\midrule
+SST2 & 34 & 0.42\% \\
+MRPC & 465 & 13.04\% \\
+COLA & 169 & 8.74\% \\
+STSB & 448 & 13.70\% \\
+QQP & 191 & 1.03\% \\
+MNLI & 31 & 0.14\% \\
+QNLI & 83 & 0.41\% \\
+RTE & 509 & 12.12\% \\
+\bottomrule
+\end{tabular}
+\caption{Train-test vocabulary overlap statistics. \textbf{OOV Tokens}: number of unique tokens in the test set that don't appear in the training set; \textbf{OOV\%}: percentage of test vocabulary not found in train. Lower percentages indicate better vocabulary coverage, which is beneficial for pruning.}
+\label{tab:vocab_overlap}
+\end{table} 
