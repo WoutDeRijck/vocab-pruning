@@ -15,90 +15,87 @@
 \usepackage{graphicx}
 \usepackage{url}
 \usepackage{import}
+\usepackage{xcolor}
 
 \title{\huge \textbf{Words That Matter:\\ Vocabulary Pruning in ModernBERT}}
-\author{Wout De Rijck, Dr. Ir. Karel D'Oosterlinck, \\ Prof. Dr. Ir. Thomas Demeester, Prof. Dr. Ir. Chris Develder}
+\author{Wout De Rijck, Prof. Dr. Ir. Thomas Demeester, \\ Prof. Dr. Ir. Chris Develder, Dr. Ir. Karel D'Oosterlinck}
 \date{} % No date
 
 \begin{document}
 \maketitle
-% Motivation / Context (1–2 sentences):
-% Start with the why. What's the broader problem or challenge? Why is this area important right now (e.g., limitations of current LLMs, safety, interpretability, efficiency)?
-
-% Gap / Problem Statement:
-% What specific problem or limitation does your paper address? This sets the stage for your contribution. It should hint at a shortcoming in current approaches without being overly critical.
-
-% Your Approach / Contribution:
-% What did you do? This is the heart of the abstract. It could be:
-
-% a new method or model
-
-% a novel dataset or benchmark
-
-% a unique analysis or framework
-
-% an improvement on performance, interpretability, etc.
 
 \begin{abstract}
-Large language models like ModernBERT deliver impressive performance but face a critical deployment challenge: their substantial computational and memory demands restrict their use in resource-constrained environments. While various pruning techniques exist to address this bottleneck, most require expensive post-pruning fine-tuning—creating a paradoxical situation where model optimization itself demands significant resources. This paper introduces a novel vocabulary pruning approach for ModernBERT that eliminates the need for post-pruning recovery fine-tuning, delivering superior efficiency particularly at smaller pruning ratios (5-20\%). The proposed technique specifically targets the embedding layer—which constitutes 25.95\% of the model's parameters but remains surprisingly underexplored in compression research—through systematic token importance analysis based on TF-IDF with specialized out-of-vocabulary (OOV) token handling. Experiments on the GLUE benchmark demonstrate that vocabulary pruning alone achieves 20-23\% parameter reduction while maintaining 97.6\% of the original performance, outperforming encoder-based pruning methods at these ratios. 
-Benchmark measurements confirm practical benefits: 20\% reduction in storage size, about 15\% reduction in GPU memory, and no impact on inference time. This work establishes an efficient pathway for creating lightweight, task-specific transformer models through offline pre-fine-tuning optimizations rather than computationally expensive retraining.
+
+Large Language Models (LLMs) require substantial computational and memory resources, limiting their utility in resource constrained environments. 
+ModernBERT is a smaller encoder-only language model that excels at various tasks while being computationally highly efficient. 
+In this work, we study how much more ModernBERT can be compressed while retaining accuracy on any given task.
+Specifically, we introduce a series of very simple vocabulary pruning techniques that target the embedding layer. We compare the resulting accuracy with LoSparse, a state-of-the-art gradient-based pruning technique that targets the encoder layers.
+For the same reduction in total parameters of $\sim$20\%, our much simpler vocabulary pruning technique retained on average 97.6\% of ModernBERT's performance across various tasks, while LoSparse retained only 92.9\%.
+The strong performance of our simple technique indicates that task-specific pruning can meaningfully increase the efficiency of ModernBERT, an already highly efficient model. Additionally, our results suggest that state-of-the-art encoder-layer pruning can fall short of simple embedding-layer pruning.
+
 \end{abstract}
 
-% Key Results:
-% Give a quick summary of your main findings or improvements—include metrics or comparisons if possible, but keep it digestible.
-
-% Implications / Why It Matters:
-% What's the takeaway? How might this move the field forward, or be used by other researchers or practitioners?
-
-% Tone and Tease:
-% While all of the above should be there, the language should still invite curiosity. Think clear, precise, but also hook-y—like:
-% "We show that…", "Surprisingly, we find…", "This reveals a new direction for…"
-
 \section{Introduction}
-
-Language models like ModernBERT have revolutionized natural language processing, achieving unprecedented performance across virtually every core NLP task—from sentiment analysis and natural language inference to question answering and summarization. However, this remarkable progress comes with a significant cost: a state-of-the-art model requiring multiple gigabytes of memory simply cannot run on the billions of smartphones, IoT devices, and edge computing platforms that could benefit most from NLP capabilities. This deployment gap—between what's technically possible in research environments and what's practically deployable in the real world—represents one of the most pressing challenges in making advanced AI accessible. The success of these models stems from massive embedding layers and deep stacks of self-attention and feed-forward blocks, which together learn extraordinarily rich, contextualized token representations. Yet this very scale makes them difficult to deploy: memory footprints measured in multiple gigabytes, inference latencies unsuited to on-device or real-time use, and the sheer cost of fine-tuning or retraining pruned variants can all stand in the way of practical adoption.
+Efficiency is crucial for modern language models—every additional parameter not only increases storage and memory-bandwidth requirements but also drives up cloud-hosting bills and overall energy consumption.
+Efficiency can be assessed along several dimensions, including inference latency, throughput, energy consumption, parameter count, and memory usage.
+In this work, the focus is on pruning model weights to reduce the memory footprint, as fewer weights lead to lower storage and memory bandwidth requirements, resulting in faster model loading, reduced deployment costs, and improved accessibility for edge devices or resource-constrained environments.
 \\ \\
-Pruning—selectively removing parameters deemed non-essential—has emerged as one of the most promising paths to slim down these models. To date, however, the majority of work has focused on sparsifying or structurally pruning the encoder layers: zeroing out small weights in feed-forward networks, dropping entire attention heads, or even omitting full transformer blocks during inference. While these methods can yield substantial compression, they often require additional fine-tuning to recover lost accuracy, and they overlook a particularly "heavy" component of transformer architectures: the embedding layer. This tunnel vision in pruning research represents a missed opportunity for significant efficiency gains.
+\begin{figure}[t]
+\centering
+\includegraphics[width=\columnwidth]{images/performance_retention.png}
+\caption{Average Performance Retention Across All Tasks for different pruning methods.}
+\label{fig:pruning_retention}
+\end{figure}
+ModernBERT is one of the most efficient models from this perspective. 
+It is a highly optimized, encoder-only transformer that brings together multiple architectural and training innovations—such while maintaining strong downstream performance and minimizing inference cost shortly and the potential impact. 
+Given these advances, an open question remains: Can ModernBERT's efficiency be pushed even further by pruning its weight parameters?
 \\ \\
-In BERT-style models, the token embedding matrix alone can account for 25.95\% of all parameters in ModernBERT, yet vocabulary pruning remains comparatively underexplored. Simple heuristics—such as keeping only tokens observed in a downstream training corpus—provide a strong starting point and can achieve substantial size reductions with minimal performance impact. However, as the experiments in this paper demonstrate, these approaches don't fully capture semantic importance, miss opportunities to optimize token relationships, and often lack principled strategies for handling out-of-vocabulary tokens. While effective, they leave room for more sophisticated techniques that can push compression limits further while maintaining semantic integrity. This paper advances embedding-level pruning from a useful baseline to a central, integral component of model compression pipelines.
+ModernBERT is not a fully general-purpose model, as it still requires fine-tuning for each specific downstream task. This work focuses on task-specific pruning, which leverages that adaptation phase to remove weights irrelevant to the target task, enabling efficient compression with minimal performance loss. Unlike general-purpose compression, task-specific pruning can be more precise, resulting in smaller models tailored to specific use cases.
 \\ \\
-This paper presents a vocabulary pruning approach for ModernBERT~\cite{modernbert2023} that operates as a pre-fine-tuning optimization step and directly addresses these gaps. The method proceeds in two complementary stages. First, a task-specific token importance analysis using TF-IDF scores---balancing how often a token appears in the target dataset against its informativeness across the corpus---identifies and retains only the most critical subword embeddings. Second, rather than relegating all pruned tokens to a generic [UNK] index, semantic clustering over the removed embeddings maps each out-of-vocabulary token to its nearest cluster representative. This preserves nuanced semantic relationships without expanding the model's vocabulary size.
-\\ \\
-Because this pruning pipeline operates purely as a pre-fine-tuning optimization step and introduces no additional gradient updates, it can be applied to any pre-trained transformer with minimal overhead. Moreover, it dovetails seamlessly with existing encoder-layer pruning techniques---such as LoSparse's~\cite{losparse2023} combined low-rank plus sparse factorization---enabling an end-to-end compression strategy that tackles both embeddings and intermediate representations.
-\\ \\
-Validation on the GLUE benchmark suite~\cite{wang2018glue} shows that ModernBERT's embedding matrix can be reduced by up to 77.34\% (translating to a 20\% total parameter reduction) while incurring less than 1\% average degradation in downstream accuracy. The approach demonstrates superior performance compared to encoder-layer pruning techniques at lower pruning ratios (5-20\%), with practical benefits including 20\% reduction in storage size and 14.83\% reduction in GPU memory requirements. When combined with LoSparse encoder pruning for more aggressive compression, overall parameter reduction exceeds 35\% with still under 2\% performance loss---demonstrating that vocabulary and encoder pruning are both necessary and synergistic for building lightweight, high-performance transformer models.
-\\ \\
-In summary, the contributions of this paper are:
-
-\begin{itemize}
-    \item A vocabulary pruning methodology that operates as a pre-fine-tuning optimization step, eliminating the need for post-pruning recovery fine-tuning typically associated with model compression.
-    
-    \item A systematic comparison of token importance estimation techniques, revealing that TF-IDF with OOV handling provides the most robust performance across diverse NLP tasks.
-    
-    \item Empirical evidence that vocabulary pruning outperforms encoder-based pruning at lower pruning ratios (5-20\%), offering a more efficient pathway for moderate model compression.
-    
-    \item Practical deployment benefits including 20\% reduction in storage size and 14.83\% reduction in GPU memory with no inference time penalty.
-\end{itemize}
-By placing vocabulary pruning on equal footing with encoder-layer sparsification, Words That Matter opens a practical pathway to more compact, efficient, and deployable transformer models---bringing state-of-the-art NLP within reach of resource-constrained environments.
+This work targets the embedding layer for pruning, motivated by the observation that for many tasks, a small fraction of tokens accounts for the majority of token occurrences. 
+This redundancy allows for effective vocabulary pruning by removing unimportant embeddings with minimal impact on performance. 
+Simple frequency- and TF-IDF-based methods are used to identify and discard low-importance tokens. 
+The approach is compared to LoSparse, demonstrating that embedding-layer pruning can achieve strong efficiency gains with less complexity.
+\\
+The best-performing technique is TF-IDF-based pruning, which removes 77.34\% of the embedding layer while retaining 97.6\% of ModernBERT's original performance. This is a remarkable result, as it demonstrates that the vast majority of embeddings can be discarded without significantly affecting task accuracy. It highlights the extreme redundancy in the embedding layer and the effectiveness of simple, task-aware pruning strategies.
 
 \section{Related work}
 Model compression techniques enhance the efficiency of large language models (LLMs) by reducing their size and computational requirements. Most modern LLM compression approaches operate under post-training settings, eliminating the need for resource-intensive retraining. Model compression strategies for LLMs can be categorized into four primary methods:
 
 \begin{enumerate}
     \item Quantization: Reduces the numerical precision of model weights, decreasing memory footprint while maintaining reasonable performance.
-    
     \item Parameter pruning: Eliminates redundant or less important connections and neurons to create sparser models with fewer parameters.
-    
     \item Low-rank approximation: Decomposes weight matrices into lower-dimensional representations that capture essential information while requiring fewer parameters.
-    
     \item Knowledge distillation: Transfers knowledge from larger teacher models to smaller student models, enabling competitive performance with reduced architecture size.
 \end{enumerate}
 These approaches are complementary and can be combined to achieve optimal compression from different perspectives. 
 This work focuses on pruning techniques to reduce model size while preserving performance.
 For ModernBERT, an encoder-only model, this research examines specific pruning methods for encoder layers and separate techniques for the embedding matrix.
 
-\subsection{Vocabulary Pruning Techniques}
+% \subsection{Encoder-Layer Pruning}
+% Although this paper focuses on vocab/embedding pruning, many complementary pruning methods work at the encoder layers. A classic example is \textbf{attention-head pruning}: Michel et al.~\cite{michel2019sixteen} discovered that a large percentage of attention heads can be removed at test time without significantly impacting performance. Voita et al.~\cite{voita2019analyzing} likewise pruned 38 of 48 encoder heads in an NMT transformer (removing $\sim$79\% of heads) with only a 0.15 BLEU loss.
+% \\ \\
+% In practice, toolkit frameworks (like TextPruner) often support head and FFN pruning alongside vocab pruning. Other methods include \textit{movement pruning}~\cite{sanh2020movement} that gradually zeros out small weights during fine-tuning, or \textit{LayerDrop}~\cite{fan2020layerdrop} which stochastically drops whole layers during training.
 
+\subsection{Encoder-Layer Pruning}
+
+Encoder-layer pruning methods aim to remove redundant parameters within the transformer encoder to reduce model size while retaining accuracy. A representative example is \textbf{LoSparse}~\cite{li2023losparse}, which decomposes each weight matrix into a low-rank component and a sparse residual. The low-rank term captures the dominant shared subspace, while the sparse term accounts for residual variation. During fine-tuning, LoSparse uses first-order sensitivity scores—computed as the product of each weight and its gradient—to iteratively prune low-importance parameters. 
+\\
+Several alternative encoder pruning techniques have been proposed. \textbf{Attention-head pruning}~\cite{michel2019sixteen} removes entire attention heads with minimal performance loss. \textbf{Movement pruning}~\cite{sanh2020movement} applies gradient-guided masking to gradually zero out low-importance weights during fine-tuning. \textbf{LayerDrop}~\cite{fan2020layerdrop} introduces structured dropout, allowing entire transformer layers to be stochastically removed during training and optionally pruned at inference.
+\\ \\
+These encoder-layer pruning methods differ in their granularity and strategy—targeting individual weights, attention heads, or full layers. Among them, LoSparse stands out as a strong baseline for encoder-level pruning.
+
+
+\subsection{Embedding-Layer Pruning and Compression}
+Pruning the embedding layer often means removing or compressing rows (token vectors) to shrink this heavy component. \textbf{Partial Embedding Matrix Adaptation (PEMA)} by Bousquet et al.~\cite{bousquet2023pema} is one systematic approach: they first note that fine-tuning datasets typically use only a small fraction of the full vocabulary. PEMA therefore builds a partial embedding matrix containing only tokens seen in the task data, training on that smaller matrix. This saves GPU memory during fine-tuning without altering task accuracy. After fine-tuning, the updated embeddings are merged back into the full matrix so the model structure remains unchanged. Experiments show large memory reductions: e.g., BERT$_{\text{BASE}}$'s embedding matrix can shrink by $\sim$47\% on average (and RoBERTa by $\sim$52\%) when only task-relevant tokens are kept. Multilingual models see even more savings (mBERT $\sim$44\% embedding reduction, XLM-R $\sim$64\%) because their vocabularies are huge. Crucially, PEMA reports no drop in downstream performance, making it a practical way to prune embeddings during training.
+\\ \\
+Another approach is \textbf{embedding compression} via factorization or hashing. Wang et al.~\cite{wang2023lighttoken} propose \textbf{LightToken}, which compresses the entire embedding matrix using low-rank SVD plus a binary residual autoencoder. They note token embeddings are highly redundant (the embedding takes $\sim$21--31\% of BERT/RoBERTa's size). LightToken first applies a rank-$k$ SVD to capture most variation, then learns compact hash codes to reconstruct the residual. In experiments on GLUE, LightToken achieves very high compression (e.g., 25$\times$ smaller embeddings) while preserving accuracy. For BERT$_{\text{BASE}}$, a 25$\times$ embedding compression yields an average GLUE score of 82.9 (baseline 83.0).
+\\ \\
+These methods show that even structured low-rank or quantized pruning of embeddings can yield massive space savings with minimal impact on performance.
+\\ \\
+Overall, embedding-layer pruning techniques exploit the fact that many token vectors (especially for rare subwords) contribute little to end-task accuracy. By either dropping unused rows (PEMA/TextPruner) or factoring and quantizing embeddings (LightToken), these methods reduce $\sim$25--50\% of model parameters in the embedding matrix, enabling lighter models in practice.
+
+\subsection{Vocabulary Pruning Techniques}
 Vocabulary pruning removes rarely used or task-irrelevant tokens to shrink the model's vocabulary (and its embedding matrix). Early work by Abdaoui et al.~\cite{abdaoui2020load} showed that most parameters of multilingual BERT lie in the embedding layer, so trimming unused language tokens can dramatically cut size. In "Load What You Need," they drop languages from mBERT's vocabulary and obtain up to a 45\% reduction in total parameters with comparable accuracy on XNLI.
 \\ \\
 More recently, Nair et al.~\cite{nair2023blade} proposed \textbf{BLADE}: they prune a bilingual mBERT vocabulary to include only tokens from the query and document languages for cross-lingual IR, then apply a small intermediate pretraining step. This pruned model (keeping only needed embeddings) reduced parameters by $\sim$36.5\% versus full mBERT and sped up training by $\sim$30\% and inference by $\sim$55\%, with minimal loss in retrieval quality.
@@ -111,23 +108,8 @@ In sparse-retrieval models like SPLADE, vocabulary pruning is implicit. SPLADE-X
 \\ \\
 Across tasks and languages, pruned-vocabulary models often match full models. For example, after pruning, Nair et al.~\cite{nair2023blade} report retrieval effectiveness on par with larger baselines, while achieving much faster indexing. Dorkin et al.~\cite{dorkin2025estonian} explicitly note "vocabulary pruning has no observable negative effect on the downstream task" (Estonian NER). These findings suggest vocabulary pruning is an effective way to tailor large models to specific domains or languages.
 
-\subsection{Embedding-Layer Pruning and Compression}
-
-Pruning the embedding layer often means removing or compressing rows (token vectors) to shrink this heavy component. \textbf{Partial Embedding Matrix Adaptation (PEMA)} by Bousquet et al.~\cite{bousquet2023pema} is one systematic approach: they first note that fine-tuning datasets typically use only a small fraction of the full vocabulary. PEMA therefore builds a partial embedding matrix containing only tokens seen in the task data, training on that smaller matrix. This saves GPU memory during fine-tuning without altering task accuracy. After fine-tuning, the updated embeddings are merged back into the full matrix so the model structure remains unchanged. Experiments show large memory reductions: e.g., BERT$_{\text{BASE}}$'s embedding matrix can shrink by $\sim$47\% on average (and RoBERTa by $\sim$52\%) when only task-relevant tokens are kept. Multilingual models see even more savings (mBERT $\sim$44\% embedding reduction, XLM-R $\sim$64\%) because their vocabularies are huge. Crucially, PEMA reports no drop in downstream performance, making it a practical way to prune embeddings during training.
-\\ \\
-Another approach is \textbf{embedding compression} via factorization or hashing. Wang et al.~\cite{wang2023lighttoken} propose \textbf{LightToken}, which compresses the entire embedding matrix using low-rank SVD plus a binary residual autoencoder. They note token embeddings are highly redundant (the embedding takes $\sim$21--31\% of BERT/RoBERTa's size). LightToken first applies a rank-$k$ SVD to capture most variation, then learns compact hash codes to reconstruct the residual. In experiments on GLUE, LightToken achieves very high compression (e.g., 25$\times$ smaller embeddings) while preserving accuracy. For BERT$_{\text{BASE}}$, a 25$\times$ embedding compression yields an average GLUE score of 82.9 (baseline 83.0).
-\\ \\
-These methods show that even structured low-rank or quantized pruning of embeddings can yield massive space savings with minimal impact on performance.
-\\ \\
-Overall, embedding-layer pruning techniques exploit the fact that many token vectors (especially for rare subwords) contribute little to end-task accuracy. By either dropping unused rows (PEMA/TextPruner) or factoring and quantizing embeddings (LightToken), these methods reduce the $\sim$25--50\% of model parameters in the embedding matrix, enabling lighter models in practice.
-
-\subsection{Encoder-Layer Pruning (Auxiliary Methods)}
-Although this paper focuses on vocab/embedding pruning, many complementary pruning methods work at the encoder layers. A classic example is \textbf{attention-head pruning}: Michel et al.~\cite{michel2019sixteen} discovered that a large percentage of attention heads can be removed at test time without significantly impacting performance. Voita et al.~\cite{voita2019analyzing} likewise pruned 38 of 48 encoder heads in an NMT transformer (removing $\sim$79\% of heads) with only a 0.15 BLEU loss.
-\\ \\
-In practice, toolkit frameworks (like TextPruner) often support head and FFN pruning alongside vocab pruning. Other methods include \textit{movement pruning}~\cite{sanh2020movement} that gradually zeros out small weights during fine-tuning, or \textit{LayerDrop}~\cite{fan2020layerdrop} which stochastically drops whole layers during training.
 
 \section{Method}
-
 The proposed hybrid vocabulary pruning method for ModernBERT targets the embedding layer, which constitutes approximately 25\% of the model's parameters. This approach is based on the observation that tokens in a vocabulary have varying importance for downstream tasks, and that certain tokens can be selectively removed with minimal impact on performance. The method primarily consists of two main components: token importance analysis and selective pruning, with an optional third component: semantic clustering for out-of-vocabulary (OOV) tokens that can further enhance performance in some cases.
 
 \subsection{Pre-Fine-Tuning Pruning Procedure}
@@ -150,58 +132,20 @@ All pruning techniques follow these common steps:
 \end{enumerate}
 This approach front-loads the pruning work to the pre-fine-tuning phase, meaning the actual fine-tuning process remains unchanged and operates on a model that already has a reduced parameter count. The resulting pruned model maintains its standard inference pipeline while benefiting from reduced memory requirements.
 \\ \\
-The high-level vocabulary pruning procedure, combining importance-based token pruning with optional semantic clustering for OOV token handling, is formalized in Algorithm~\ref{alg:hybrid_pruning}.
+The high-level vocabulary pruning procedure, is formalized in Algorithm~\ref{alg:pre_ft_pruning}.
 
 \begin{algorithm}[H]
-\caption{Vocabulary Pruning Procedure}
-\label{alg:hybrid_pruning}
+\small
+\caption{Pre-Fine-Tuning Vocabulary Pruning}
+\label{alg:pre_ft_pruning}
 \begin{algorithmic}[1]
-\footnotesize
-\Require Pre-trained model $M$ with vocabulary $V_{orig}$, task dataset $D$, pruning ratio $p$
-\Ensure Pruned model $M'$ with reduced vocabulary
-
-\Function{ExtractTaskVocabulary}{$D, V_{orig}$}
-    \State $V_{task} \gets $ unique tokens in dataset $D$
-    \State $V_{special} \gets $ special tokens from $V_{orig}$ (e.g., [CLS], [SEP])
-    \State \Return $V_{special} \cup V_{task}$ \Comment{Initial vocabulary reduction}
-\EndFunction
-
-\Function{RankByImportance}{$V, D$}
-    \State Calculate importance scores for tokens in $V$ using selected method
-    \State Sort $V$ by descending importance score
-    \State \Return sorted token list
-\EndFunction
-
-\Function{PruneVocabulary}{$V_{ranked}, p, M$}
-    \State $k \gets \lfloor |V_{ranked}| \times (1 - p) \rfloor$ \Comment{Number of tokens to keep}
-    \State $V_{keep} \gets $ first $k$ tokens from $V_{ranked}$
-    \State $V_{prune} \gets V_{ranked} \setminus V_{keep}$ \Comment{Tokens to be pruned}
-    
-    \If{using OOV handling}
-        \State Create mapping from pruned tokens $V_{prune}$ to appropriate representatives
-        \State \Return $V_{keep}$, mapping
-    \Else
-        \State \Return $V_{keep}$, null
-    \EndIf
-\EndFunction
-
-\Function{CreateReducedModel}{$M, V_{keep}, mapping$}
-    \State Extract embeddings for tokens in $V_{keep}$ from $M$
-    \State Create reduced embedding matrix $E'$
-    \State Update model with reduced embedding layer using $E'$
-    \If{mapping is not null}
-        \State Store mapping for OOV token handling during inference
-    \EndIf
-    \State \Return updated model
-\EndFunction
-
-\State // Main procedure
-\State $V_{base} \gets $ \Call{ExtractTaskVocabulary}{$D, V_{orig}$}
-\State $V_{ranked} \gets $ \Call{RankByImportance}{$V_{base}, D$}
-\State $V_{keep}$, mapping $\gets $ \Call{PruneVocabulary}{$V_{ranked}, p, M$}
-\State $M' \gets $ \Call{CreateReducedModel}{$M, V_{keep}$, mapping}
-
-\State \Return $M'$ \Comment{Model ready for fine-tuning}
+\Require Pretrained model $M$ with vocab $V$, dataset $D$, pruning ratio $p$
+\Ensure Pruned model $M'$
+\State $\text{stats} \gets \text{compute\_token\_statistics}(D)$
+\State $\text{scores} \gets \text{rank\_tokens}(\text{stats})$
+\State $V_{\text{keep}} \gets \text{special\_tokens}(M)\cup\text{top\_k\_tokens}(\text{scores}, 1 - p)$
+\State $M' \gets \text{rebuild\_model\_with\_vocab}(M, V_{\text{keep}})$
+\State \Return $M'$
 \end{algorithmic}
 \end{algorithm}
 
@@ -235,21 +179,21 @@ Tokens are ranked by their frequency in the target dataset, with least frequentl
 This method leverages the attention mechanism of transformer models to identify important tokens. The key insight is that tokens receiving higher attention during inference are those the model relies on most heavily when making predictions, providing a direct measure of token importance from the model's perspective. Unlike frequency-based approaches that simply count occurrences, attention-based pruning preserves tokens that meaningfully contribute to the model's decision-making process.
 \\ \\
 As an illustrative example, the important tokens identified in the SST-2 dataset differ markedly between methods. Frequency-based approaches naturally prioritize common words like articles and prepositions, while attention-based analysis highlights sentiment-laden terms that are semantically relevant to the classification task.
-\begin{figure*}[t]
-\centering
-\begin{minipage}{0.48\textwidth}
-  \centering
-  \includegraphics[width=\textwidth]{images/wordcloud_frequency.png}
-\end{minipage}%
-\hfill
-\begin{minipage}{0.48\textwidth}
-  \centering
-  \includegraphics[width=\textwidth]{images/wordcloud_attention.png}
-\end{minipage}
-\caption{Comparison of top-ranked tokens for SST-2 task using frequency-based (left) versus attention-based (right) importance metrics.}
-\label{fig:wordcloud-comparison}
-\end{figure*}
-The visualization in Figure \ref{fig:wordcloud-comparison} demonstrates how attention-based pruning better captures task-relevant information, preserving tokens that carry greater semantic weight for the specific downstream task.
+% \begin{figure*}[t]
+% \centering
+% \begin{minipage}{0.48\textwidth}
+%   \centering
+%   \includegraphics[width=\textwidth]{images/wordcloud_frequency.png}
+% \end{minipage}%
+% \hfill
+% \begin{minipage}{0.48\textwidth}
+%   \centering
+%   \includegraphics[width=\textwidth]{images/wordcloud_attention.png}
+% \end{minipage}
+% \caption{Comparison of top-ranked tokens for SST-2 task using frequency-based (left) versus attention-based (right) importance metrics.}
+% \label{fig:wordcloud-comparison}
+% \end{figure*}
+% The visualization in Figure \ref{fig:wordcloud-comparison} demonstrates how attention-based pruning better captures task-relevant information, preserving tokens that carry greater semantic weight for the specific downstream task.
 \\ \\
 The technique-specific algorithm steps are:
 \begin{enumerate}
@@ -330,7 +274,6 @@ Three baseline models are established to evaluate the effectiveness of the propo
 \end{itemize}
 These baselines establish comparative benchmarks for assessing both the parameter efficiency and performance of the proposed vocabulary pruning methods. The full model provides the performance ceiling, LoSparse demonstrates the impact of encoder-only pruning, and the Train Tokens Only approach represents the simplest form of vocabulary reduction without sophisticated token selection criteria.
 
-
 \subsection{Implementation Details}
 All experiments were conducted on an NVIDIA RTX 4090 GPU. The vocabulary pruning techniques described in this paper were implemented in a public repository\footnote{\url{https://github.com/WoutDeRijck/vocab-pruning.git}}. This implementation includes all pruning methods, evaluation scripts, and analysis tools described in this work. For encoder layer pruning, a custom fork of the LoSparse implementation was used\footnote{\url{https://github.com/WoutDeRijck/LoSparse.git}}. Both codebases are released to facilitate reproducibility and further research in model compression techniques.
 
@@ -381,24 +324,18 @@ The benchmark results in Table \ref{tab:benchmark_results} further quantify the 
 
 \section{Future Work}
 
-% While this paper demonstrates the effectiveness of vocabulary pruning as a standalone technique, several promising research directions could further extend its impact:
+\section{Future Work}
+TODO (these are just things I thought about)
+\begin{itemize}
+    \item \textbf{Unified Compression Framework}: Developing an integrated approach that combines vocabulary pruning with encoder-layer compression techniques like LoSparse could provide a more comprehensive model compression solution. Preliminary experiments suggest these approaches are complementary, with vocabulary pruning excelling at lower compression ratios and encoder pruning maintaining better performance at higher ratios.
+    
+    \item \textbf{Task Adaptation Networks}: Instead of removing pruned token embeddings entirely, future work could explore low-dimensional adapter networks that efficiently transform a small set of base embeddings to approximate the full vocabulary, potentially offering better performance/size tradeoffs.
+    
+    \item \textbf{Retrieval Performance Analysis}: Evaluating vocabulary pruning on information retrieval tasks could reveal different optimal pruning strategies, as retrieval models may depend on different token importance distributions than classification tasks.
+\end{itemize}
 
-% \begin{itemize}
-%     \item \textbf{Unified Compression Framework}: Developing an integrated approach that combines vocabulary pruning with encoder-layer compression techniques like LoSparse could provide a more comprehensive model compression solution. Preliminary experiments suggest these approaches are complementary, with vocabulary pruning excelling at lower compression ratios and encoder pruning maintaining better performance at higher ratios.
-    
-%     \item \textbf{Task Adaptation Networks}: Instead of removing pruned token embeddings entirely, future work could explore low-dimensional adapter networks that efficiently transform a small set of base embeddings to approximate the full vocabulary, potentially offering better performance/size tradeoffs.
-    
-%     \item \textbf{Retrieval Performance Analysis}: Evaluating vocabulary pruning on information retrieval tasks could reveal different optimal pruning strategies, as retrieval models may depend on different token importance distributions than classification tasks.
-    
-%     \item \textbf{Cross-Lingual Applications}: Extending this approach to multilingual models presents an exciting opportunity, as these models typically have much larger vocabularies with significant redundancy across languages. Token importance may vary by language, suggesting language-specific pruning strategies.
-    
-%     \item \textbf{Dynamic Vocabulary Adaptation}: Rather than static pruning, future systems could implement dynamic vocabulary management that adapts to shifting data distributions or task requirements during deployment.
-    
-%     \item \textbf{Theoretical Foundations}: Developing formal methods to establish theoretical bounds on performance loss relative to vocabulary reduction could provide valuable insights for model design and compression strategies.
-% \end{itemize}
-
-% These directions collectively aim to further reduce the computational and memory requirements of large language models while maintaining their impressive capabilities, ultimately making state-of-the-art NLP more accessible across diverse computing environments.
 \newpage
+\onecolumn
 \bibliographystyle{plain}
 \bibliography{references}
 
