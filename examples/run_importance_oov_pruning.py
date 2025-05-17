@@ -48,7 +48,7 @@ IMPORTANCE_TYPE = 3
 TASK_PARAMS = {
     "cola": {
         "epochs": 8,
-        "learning_rate": 8e-5,
+        "learning_rate": 5e-5,
         "batch_size": BATCH_SIZE,
         "weight_decay": 1e-6,
         "prune_percent": PRUNE_PERCENT,
