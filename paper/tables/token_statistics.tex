@@ -2,10 +2,10 @@
 \centering
 \scriptsize
 \setlength{\tabcolsep}{3pt}
-\begin{tabular}{l|cc|cc|cc|c}
+\begin{tabular}{l|rr|rr|rr|r}
 \toprule
 \textbf{Task} & \multicolumn{2}{c|}{\textbf{Unique Tokens}} & \multicolumn{2}{c|}{\textbf{Vocab Cov. (\%)}} & \multicolumn{2}{c|}{\textbf{Top 20\%}} & \textbf{OOV} \\
- & \textbf{Train} & \textbf{Test} & \textbf{Train} & \textbf{Test} & \textbf{Train} & \textbf{Test} & \textbf{\%} \\
+    & \textbf{Train} & \textbf{Test} & \textbf{Train} & \textbf{Test} & \textbf{Train} & \textbf{Test} & \textbf{\%} \\
 \midrule
 COLA & 5,416 & 1,934 & 17.74 & 6.34 & 85.12 & 74.68 & 8.74 \\
 MNLI & 25,793 & 22,664 & 84.51 & 74.25 & 90.69 & 89.64 & 0.14 \\
@@ -17,6 +17,7 @@ SST2 & 11,536 & 8,084 & 37.80 & 26.49 & 84.23 & 80.53 & 0.42 \\
 STSB & 10,346 & 3,271 & 33.90 & 10.72 & 82.66 & 71.30 & 13.70 \\
 \bottomrule
 \end{tabular}
-\caption{Token statistics across GLUE tasks, comparing train and test splits. OOV\%: percentage of test vocabulary not found in train.}
+\caption{Token statistics across GLUE tasks. Vocab Cov.: percentage of model vocabulary present in data. Top 20\%: token coverage by most frequent 20\% of vocabulary. OOV\%: test tokens not in training.}
+
 \label{tab:token_statistics}
 \end{table}

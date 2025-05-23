@@ -13,6 +13,9 @@ GPU Mem (MB) & 823.06 & 700.99 & 14.83 \\
 Infer. Time (ms) & 18.73 & 18.98 & -1.33 \\
 \bottomrule
 \end{tabular}
-\caption{Benchmark results comparing base ModernBERT with pruned variant.}
+% \caption{Benchmark results comparing base ModernBERT with pruned variant.}
+% \caption{Benchmark results comparing base ModernBERT with pruned variant during inference on an RTX 4090.}
+\caption{Benchmark results comparing base ModernBERT with pruned variant (TF-IDF + OOV) during inference on an RTX 4090. Our method achieves 20\% reduction in total parameters (77.34\% of embedding parameters) and a 14.83\% reduction in GPU memory with negligible impact on inference time.}
+
 \label{tab:benchmark_results}
 \end{table} 

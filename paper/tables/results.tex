@@ -2,38 +2,40 @@
 \centering
 \scriptsize
 \setlength{\tabcolsep}{9pt}
-\begin{tabular}{l@{\hspace{25pt}}cccccccc:c}
+\begin{tabular}{l@{\hspace{25pt}}ccccccccc}
 \toprule
-& \multicolumn{2}{c}{\textbf{Single Sentence}} & \multicolumn{3}{c}{\textbf{Paraphrase and Similarity}} & \multicolumn{3}{c}{\textbf{Natural Language Inference}} & \\
+& \multicolumn{2}{c}{\textbf{Single Sentence}} & \multicolumn{3}{c}{\textbf{Paraphrase and Similarity}} & \multicolumn{3}{c}{\textbf{Natural Language Inference}} & \multirow{2}{*}{\makebox[-20pt][c]{\vrule width 0.5pt height 175pt}\hspace{35pt}} \\
 \cmidrule(lr){2-3} \cmidrule(lr){4-6} \cmidrule(lr){7-9}
 \textbf{Method} & \textbf{SST-2} & \textbf{CoLA} & \textbf{MRPC} & \textbf{STS-B} & \textbf{QQP} & \textbf{MNLI} & \textbf{QNLI} & \textbf{RTE} & \textbf{AVG} \\
 \midrule
 \multicolumn{10}{l}{\textbf{Baseline}} \\
 ModernBERT (Full) & 0.951 & 0.632 & 0.89 & 0.917 & 0.917 & 0.881 & 0.939 & 0.643 & 0.846 \\
 \midrule
-\multicolumn{10}{l}{\textbf{Encoder Layer Pruning}} \\
-LoSparse & 0.929 & 0.525 & 0.856 & 0.882 & 0.911 & 0.858 & 0.907 & 0.610 & 0.810 \\
-\textit{Parameter Reduction} & \textit{20.16\%} & \textit{20.16\%} & \textit{20.16\%} & \textit{20.16\%} & \textit{20.16\%} & \textit{20.16\%} & \textit{20.16\%} & \textit{20.16\%} &  \\
-\midrule
 \multicolumn{10}{l}{\textbf{Vocabulary Pruning}} \\
+Train Tokens Only & 0.950 & 0.630 & 0.861 & 0.917 & 0.917 & 0.883 & 0.915 & 0.639 & 0.839 \\
+\textit{Parameter Reduction} & \textit{18.85\%} & \textit{22.61\%} & \textit{18.56\%} & \textit{18.76\%} & \textit{4.79\%} & \textit{6.74\%} & \textit{6.42\%} & \textit{17.06\%} & \textit{14.22\%} \\
+\\ [-6pt]
+\hdashline
+\\[-6pt]
 Random Selection & 0.911 & 0.470 & 0.798 & 0.845 & 0.780 & 0.504 & 0.669 & 0.566 & 0.693 \\
 Clustering-Based & 0.899 & 0.051 & 0.714 & 0.786 & 0.774 & 0.501 & 0.510 & 0.566 & 0.600 \\
-Frequency-Based & 0.943 & 0.467 & 0.812 & 0.905 & 0.904 & 0.858 & 0.902 & 0.546 & 0.792 \\
 Attention-Based & \textbf{0.947} & 0.589 & \textbf{0.864} & 0.885 & 0.763 & 0.683 & 0.791 & 0.578 & 0.763 \\
+Simple Frequency-Based & 0.943 & 0.467 & 0.812 & 0.905 & 0.904 & 0.858 & 0.902 & 0.546 & 0.792 \\
 TF-IDF Based & 0.933 & 0.520 & 0.807 & 0.901 & 0.898 & \textbf{0.860} & \textbf{0.909} & 0.610 & 0.805 \\
 \\ [-6pt]
 \hdashline
 \\[-6pt]
-Freq + OOV & 0.938 & 0.540 & 0.828 & \textbf{0.906} & \textbf{0.915} & 0.858 & 0.907 & 0.615 & 0.813 \\
+Simple Frequency + OOV & 0.938 & 0.540 & 0.828 & \textbf{0.906} & \textbf{0.915} & 0.858 & 0.907 & 0.615 & 0.813 \\
 TF-IDF + OOV & 0.923 & \textbf{0.615} & 0.834 & 0.903 & 0.912 & 0.858 & 0.908 & \textbf{0.635} & \textbf{0.824} \\
-\textit{Parameter Reduction} & \textit{20.25\%} & \textit{23.27\%} & \textit{20.02\%} & \textit{20.18\%} & \textit{20.02\%} & \textit{20.02\%} & \textit{20.02\%} & \textit{20.02\%} &  \\
-\\ [-6pt]
-\hdashline
-\\[-6pt]
-Train Tokens Only & 0.950 & 0.630 & 0.861 & 0.917 & 0.917 & 0.883 & 0.915 & 0.639 & 0.839 \\
-\textit{Parameter Reduction} & \textit{18.85\%} & \textit{22.61\%} & \textit{18.56\%} & \textit{18.76\%} & \textit{4.79\%} & \textit{6.74\%} & \textit{6.42\%} & \textit{17.06\%} & \\
+\textit{Parameter Reduction} & \textit{20.25\%} & \textit{23.27\%} & \textit{20.02\%} & \textit{20.18\%} & \textit{20.02\%} & \textit{20.02\%} & \textit{20.02\%} & \textit{20.02\%} & \textit{20.48\%} \\
+\midrule
+\multicolumn{10}{l}{\textbf{Encoder Layer Pruning}} \\
+LoSparse & 0.929 & 0.525 & 0.856 & 0.882 & 0.911 & 0.858 & 0.907 & 0.610 & 0.810 \\
+\textit{Parameter Reduction} & \textit{20.16\%} & \textit{20.16\%} & \textit{20.16\%} & \textit{20.16\%} & \textit{20.16\%} & \textit{20.16\%} & \textit{20.16\%} & \textit{20.16\%} & \textit{20.16\%} \\
 \bottomrule
 \end{tabular}
-\caption{Performance on GLUE dev set. ModernBERT is fine-tuned separately for each task. Scores are accuracies except for CoLA (Matthew's correlation), and STS-B (Pearson correlation). "+ OOV" indicates the pruning technique combined with out-of-vocabulary clustering for token remapping. Parameter reduction percentages show total model size decrease for each method.}
+\caption{Performance on GLUE dev set. ModernBERT is fine-tuned separately for each task. Scores are accuracies except for CoLA (Matthew's correlation), and STS-B (Pearson correlation). Notation "+ OOV" indicates pruning with out-of-vocabulary clustering. At 20\% parameter reduction, TF-IDF + OOV maintains 97.6\% of original performance and outperforms LoSparse (0.824 vs 0.810 average score). OOV handling improves results by 1.9 percentage points on average.}
+
+
 \label{tab:results}
-\end{table*} 
+\end{table*}
