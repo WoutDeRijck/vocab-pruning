@@ -176,7 +176,7 @@ def parse_args():
         "--clustering_method", 
         type=str, 
         default=None,
-        choices=["agglomerative", "kmeans"],
+        choices=["agglomerative", "kmeans", "dbscan"],
         help="Override the default clustering method for all tasks"
     )
     

@@ -135,7 +135,7 @@ def parse_args():
         "--clustering_method", 
         type=str, 
         default="agglomerative",
-        choices=["agglomerative", "kmeans"],
+        choices=["agglomerative", "kmeans", "dbscan"],
         help="Clustering algorithm (for clustering method)"
     )
     

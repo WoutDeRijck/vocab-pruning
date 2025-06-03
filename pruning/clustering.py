@@ -7,8 +7,9 @@ This module implements vocabulary pruning based on token embedding clustering.
 import logging
 import numpy as np
 import torch.nn as nn
-from sklearn.cluster import KMeans, AgglomerativeClustering
+from sklearn.cluster import KMeans, AgglomerativeClustering, DBSCAN
 from scipy.spatial.distance import pdist, squareform
+from scipy.cluster.hierarchy import linkage, fcluster
 from transformers import AutoTokenizer
 
 from .base import get_dataset_vocabulary, create_reduced_embeddings
@@ -27,7 +28,7 @@ def cluster_embeddings(token_ids, model, prune_percent, clustering_method="agglo
         token_ids: List of token IDs to consider for clustering
         model: Model whose embeddings will be used
         prune_percent: Percentage of vocabulary to prune through clustering
-        clustering_method: Method to use for clustering (agglomerative or kmeans)
+        clustering_method: Method to use for clustering (agglomerative, kmeans, or dbscan)
         param_based: If True, prune based on parameter percentage rather than token percentage
         total_params: Total parameters in the model (needed for parameter-based pruning)
         total_vocab_size: Total size of the original vocabulary
@@ -104,6 +105,119 @@ def cluster_embeddings(token_ids, model, prune_percent, clustering_method="agglo
         # Use K-means clustering
         clustering = KMeans(n_clusters=n_clusters, random_state=42)
         cluster_labels = clustering.fit_predict(normalized_embeddings)
+    elif clustering_method == "dbscan":
+        # Use DBSCAN clustering with post-processing to achieve target pruning
+        logger.info("Using DBSCAN clustering with post-processing to achieve target pruning ratio...")
+        
+        # Start with a reasonable eps value for initial clustering
+        initial_eps = 0.3
+        dbscan = DBSCAN(eps=initial_eps, min_samples=2, metric='cosine')
+        cluster_labels = dbscan.fit_predict(normalized_embeddings)
+        
+        # Handle noise points by assigning each to its own cluster
+        noise_points = np.where(cluster_labels == -1)[0]
+        if len(noise_points) > 0:
+            max_cluster = max(cluster_labels) if len(cluster_labels[cluster_labels != -1]) > 0 else -1
+            for i, noise_idx in enumerate(noise_points):
+                cluster_labels[noise_idx] = max_cluster + 1 + i
+        
+        initial_clusters = len(set(cluster_labels))
+        logger.info(f"DBSCAN found {initial_clusters} initial clusters (target: {n_clusters})")
+        
+        # Post-processing to achieve target number of clusters
+        if initial_clusters > n_clusters:
+            # Too many clusters - need to merge some
+            logger.info(f"Merging clusters to reduce from {initial_clusters} to {n_clusters}")
+            
+            # Use scipy's optimized linkage algorithm for efficient merging
+            # Get cluster centroids
+            cluster_ids = list(set(cluster_labels))
+            centroids = []
+            cluster_id_map = {}
+            
+            for i, cluster_id in enumerate(cluster_ids):
+                cluster_mask = cluster_labels == cluster_id
+                centroid = np.mean(normalized_embeddings[cluster_mask], axis=0)
+                centroids.append(centroid)
+                cluster_id_map[i] = cluster_id
+            
+            centroids = np.array(centroids)
+            
+            # Calculate pairwise distances between centroids using cosine distance
+            distances = pdist(centroids, metric='cosine')
+            
+            # Perform hierarchical clustering on centroids
+            linkage_matrix = linkage(distances, method='average')
+            
+            # Get cluster assignments for target number of clusters
+            new_cluster_assignments = fcluster(linkage_matrix, n_clusters, criterion='maxclust')
+            
+            # Map back to original tokens
+            current_labels = cluster_labels.copy()
+            for i, new_cluster in enumerate(new_cluster_assignments):
+                original_cluster_id = cluster_id_map[i]
+                # All tokens in this original cluster get assigned to the new cluster
+                current_labels[cluster_labels == original_cluster_id] = new_cluster - 1  # fcluster returns 1-based
+            
+            cluster_labels = current_labels
+        
+        elif initial_clusters < n_clusters:
+            # Too few clusters - split largest clusters
+            logger.info(f"Splitting clusters to increase from {initial_clusters} to {n_clusters}")
+            
+            current_labels = cluster_labels.copy()
+            splits_needed = n_clusters - initial_clusters
+            
+            while splits_needed > 0 and len(set(current_labels)) < n_clusters:
+                # Find clusters that can be split (size > 1) and sort by size
+                cluster_sizes = {}
+                for cluster_id in set(current_labels):
+                    cluster_sizes[cluster_id] = np.sum(current_labels == cluster_id)
+                
+                # Get clusters that can be split, sorted by size (largest first)
+                splittable_clusters = [(size, cluster_id) for cluster_id, size in cluster_sizes.items() if size > 1]
+                splittable_clusters.sort(reverse=True)
+                
+                if not splittable_clusters:
+                    logger.warning("Cannot split further - no clusters with more than 1 token")
+                    break
+                
+                # Split the largest cluster(s) - can do multiple in parallel if they don't overlap
+                max_cluster_id = max(current_labels)
+                splits_this_round = min(splits_needed, len(splittable_clusters))
+                
+                for i in range(splits_this_round):
+                    cluster_size, cluster_id = splittable_clusters[i]
+                    
+                    if cluster_size <= 1:  # Already too small
+                        continue
+                    
+                    # Split this cluster using K-means with k=2
+                    cluster_mask = current_labels == cluster_id
+                    cluster_embeddings = normalized_embeddings[cluster_mask]
+                    
+                    if len(cluster_embeddings) >= 2:
+                        kmeans = KMeans(n_clusters=2, random_state=42, n_init=10)
+                        sub_labels = kmeans.fit_predict(cluster_embeddings)
+                        
+                        # Assign new cluster ID to one of the sub-clusters
+                        new_cluster_id = max_cluster_id + 1 + i
+                        
+                        # Update labels
+                        cluster_indices = np.where(cluster_mask)[0]
+                        for j, sub_label in enumerate(sub_labels):
+                            if sub_label == 1:  # Assign second sub-cluster to new ID
+                                current_labels[cluster_indices[j]] = new_cluster_id
+                
+                splits_needed -= splits_this_round
+                if splits_needed <= 0:
+                    break
+            
+            cluster_labels = current_labels
+        
+        # Update n_clusters to actual final number
+        n_clusters = len(set(cluster_labels))
+        logger.info(f"Final DBSCAN result after post-processing: {n_clusters} clusters")
     else:
         # Use agglomerative clustering
         try:
@@ -200,7 +314,7 @@ def setup_clustering_based_model(task_name, model_name, prune_percent=0, cluster
         task_name: Name of the GLUE task
         model_name: Base model to use
         prune_percent: Percentage of tokens or parameters to prune through clustering
-        clustering_method: Method to use for clustering
+        clustering_method: Method to use for clustering (agglomerative, kmeans, or dbscan)
         param_based: If True, prune based on parameter percentage rather than token percentage
         
     Returns:
